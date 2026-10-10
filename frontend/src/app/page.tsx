@@ -19,6 +19,36 @@ export interface Product {
   category?: string;
 }
 
+/**
+ * Interface cho tùy chọn kích cỡ (Size)
+ */
+export interface SizeOption {
+  id: string;
+  name: string;
+  extraPrice: number;
+}
+
+/**
+ * Interface cho tùy chọn Topping
+ */
+export interface ToppingOption {
+  id: string;
+  name: string;
+  extraPrice: number;
+}
+
+/**
+ * Interface lưu thông tin tóm tắt món vừa thêm vào giỏ hàng
+ * Dùng để hiển thị Popup Modal thông báo thành công xịn sò
+ */
+export interface AddedCartItemSummary {
+  productName: string;
+  sizeName: string;
+  sizeExtraPrice: number;
+  toppings: string[];
+  totalPrice: number;
+}
+
 // ============================================================================
 // 2. DỮ LIỆU MẪU (MOCK DATA)
 // ============================================================================
@@ -70,6 +100,25 @@ export const MOCK_PRODUCTS: Product[] = [
   },
 ];
 
+/**
+ * Danh sách tùy chọn kích cỡ (Size):
+ * Size S (+0₫), Size M (+5.000₫), Size L (+10.000₫)
+ */
+export const SIZE_OPTIONS: SizeOption[] = [
+  { id: "S", name: "Size S", extraPrice: 0 },
+  { id: "M", name: "Size M", extraPrice: 5000 },
+  { id: "L", name: "Size L", extraPrice: 10000 },
+];
+
+/**
+ * Danh sách tùy chọn Topping đa chọn (Checkbox):
+ * Trân châu (+10.000₫), Kem Cheese (+10.000₫)
+ */
+export const TOPPING_OPTIONS: ToppingOption[] = [
+  { id: "boba", name: "Trân châu", extraPrice: 10000 },
+  { id: "cheese", name: "Kem Cheese", extraPrice: 10000 },
+];
+
 // ============================================================================
 // 3. HÀM TIỆN ÍCH (HELPERS)
 // ============================================================================
@@ -94,11 +143,29 @@ export default function MenuPage() {
   const [products, setProducts] = useState<Product[]>([]);
   // Trạng thái đang tải (Loading state cho DoD)
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  // Số lượng sản phẩm trong giỏ hàng (hiển thị ở bottom bar)
-  const [cartCount] = useState<number>(0);
+
+  // Quản lý giỏ hàng: số lượng món và tổng số tiền tích lũy
+  const [cartCount, setCartCount] = useState<number>(0);
+  const [cartTotal, setCartTotal] = useState<number>(0);
+
+  // --------------------------------------------------------------------------
+  // STATE CHO TASK 4: MODAL CHI TIẾT & TÙY CHỌN MÓN
+  // --------------------------------------------------------------------------
+  // Sản phẩm đang được chọn mở modal tùy chọn (null nếu modal đóng)
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  // Kích cỡ được chọn (mặc định là Size S)
+  const [selectedSize, setSelectedSize] = useState<SizeOption>(SIZE_OPTIONS[0]);
+  // Danh sách ID của các topping đã tick chọn (checkbox đa chọn)
+  const [selectedToppings, setSelectedToppings] = useState<string[]>([]);
+
+  // --------------------------------------------------------------------------
+  // STATE CHO MODAL THÔNG BÁO THÀNH CÔNG (SUCCESS DIALOG POPUP)
+  // --------------------------------------------------------------------------
+  const [addedItemSummary, setAddedItemSummary] =
+    useState<AddedCartItemSummary | null>(null);
 
   /**
-   * Giả lập hiệu ứng tải dữ liệu từ API khi vào trang (600ms)
+   * Giả lập hiệu ứng tải dữ liệu từ API khi vào trang (700ms)
    * Nhằm minh họa Skeleton Loading theo tiêu chí nghiệm thu DoD
    */
   useEffect(() => {
@@ -116,18 +183,96 @@ export default function MenuPage() {
   };
 
   /**
-   * Xử lý khi người dùng nhấn vào thẻ sản phẩm
-   * Yêu cầu: Tạm thời hiển thị alert tên món (chưa mở modal chi tiết)
+   * Mở Modal Chi tiết & tùy chọn khi click vào món
+   * Khởi tạo lại các tùy chọn mặc định (Size S, chưa chọn topping nào)
    */
-  const handleProductClick = (product: Product) => {
-    alert(`Bạn đã chọn: ${product.name} (${formatPriceVND(product.price)})`);
+  const handleOpenDetailModal = (product: Product) => {
+    setSelectedProduct(product);
+    setSelectedSize(SIZE_OPTIONS[0]);
+    setSelectedToppings([]);
   };
 
   /**
-   * Xử lý khi nhấn nút Xem giỏ hàng
+   * Đóng Modal Chi tiết món
+   */
+  const handleCloseModal = () => {
+    setSelectedProduct(null);
+  };
+
+  /**
+   * Xử lý tick / bỏ tick Topping (đa chọn)
+   */
+  const handleToggleTopping = (toppingId: string) => {
+    setSelectedToppings((prev) =>
+      prev.includes(toppingId)
+        ? prev.filter((id) => id !== toppingId)
+        : [...prev, toppingId]
+    );
+  };
+
+  /**
+   * TÍNH TOÁN ĐƠN GIÁ ĐỘNG (Dynamic Price Calculation):
+   * Công thức: Giá gốc + Giá size + Giá các topping đã tick
+   */
+  const calculateTotalPrice = (): number => {
+    if (!selectedProduct) return 0;
+    const basePrice = selectedProduct.price;
+    const sizePrice = selectedSize.extraPrice;
+    const toppingsPrice = selectedToppings.reduce((total, id) => {
+      const found = TOPPING_OPTIONS.find((t) => t.id === id);
+      return total + (found ? found.extraPrice : 0);
+    }, 0);
+
+    return basePrice + sizePrice + toppingsPrice;
+  };
+
+  /**
+   * Xử lý khi nhấn nút "Thêm vào giỏ" trong Modal:
+   * Thay thế alert() thô sơ bằng việc mở Modal Popup Thông Báo Thành Công xịn sò
+   */
+  const handleAddToCart = () => {
+    if (!selectedProduct) return;
+
+    const totalPrice = calculateTotalPrice();
+    const toppingNames = selectedToppings
+      .map((id) => TOPPING_OPTIONS.find((t) => t.id === id)?.name)
+      .filter((name): name is string => Boolean(name));
+
+    // 1. Lưu thông tin tóm tắt món vừa thêm vào state
+    setAddedItemSummary({
+      productName: selectedProduct.name,
+      sizeName: selectedSize.name,
+      sizeExtraPrice: selectedSize.extraPrice,
+      toppings: toppingNames,
+      totalPrice: totalPrice,
+    });
+
+    // 2. Cập nhật số lượng và tổng tiền giỏ hàng ở Bottom bar
+    setCartCount((prev) => prev + 1);
+    setCartTotal((prev) => prev + totalPrice);
+
+    // 3. Đóng Bottom Sheet chi tiết món
+    handleCloseModal();
+  };
+
+  /**
+   * Đóng Modal thông báo thành công để tiếp tục chọn món
+   */
+  const handleCloseSuccessModal = () => {
+    setAddedItemSummary(null);
+  };
+
+  /**
+   * Xử lý khi nhấn nút Xem giỏ hàng ở Bottom bar
    */
   const handleViewCart = () => {
-    alert("Giỏ hàng hiện tại đang trống (0 món).");
+    if (cartCount === 0) {
+      alert("Giỏ hàng của bạn hiện đang trống (0 món).");
+    } else {
+      alert(
+        `Giỏ hàng của bạn:\n• Số lượng: ${cartCount} món\n• Tổng số tiền: ${formatPriceVND(cartTotal)}`
+      );
+    }
   };
 
   return (
@@ -279,16 +424,16 @@ export default function MenuPage() {
                   Món nổi bật ({products.length})
                 </span>
                 <span className="text-[11px] text-stone-600">
-                  Chạm để chọn món
+                  Chạm để tùy chọn món
                 </span>
               </div>
 
-              {/* Lưới sản phẩm */}
+              {/* Lưới sản phẩm 2 cột */}
               <div className="grid grid-cols-2 gap-3">
                 {products.map((product) => (
                   <article
                     key={product.id}
-                    onClick={() => handleProductClick(product)}
+                    onClick={() => handleOpenDetailModal(product)}
                     className="group bg-white rounded-2xl p-2.5 shadow-sm border border-stone-200/70 hover:border-emerald-300 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col active:scale-[0.98] select-none"
                   >
                     {/* Khung ảnh món ăn bo góc rounded-2xl */}
@@ -336,7 +481,7 @@ export default function MenuPage() {
         </section>
 
         {/* ------------------------------------------------------------------ */}
-        {/* BOTTOM BAR CỐ ĐỊNH: Chứa nút 'Xem giỏ hàng (0)'                     */}
+        {/* BOTTOM BAR CỐ ĐỊNH: Chứa nút 'Xem giỏ hàng' với số lượng & tổng tiền */}
         {/* ------------------------------------------------------------------ */}
         <footer className="fixed bottom-0 left-0 right-0 z-30 max-w-md mx-auto pointer-events-none">
           <div className="p-3 bg-gradient-to-t from-[#FCFBF8] via-[#FCFBF8]/95 to-transparent pointer-events-auto">
@@ -345,7 +490,7 @@ export default function MenuPage() {
               onClick={handleViewCart}
               className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-semibold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-900/20 active:scale-[0.99] transition-all flex items-center justify-between"
             >
-              {/* Biểu tượng Giỏ hàng */}
+              {/* Biểu tượng Giỏ hàng và số lượng */}
               <div className="flex items-center gap-2.5">
                 <div className="relative">
                   <svg
@@ -370,9 +515,9 @@ export default function MenuPage() {
                 </span>
               </div>
 
-              {/* Thông tin phụ bên phải nút */}
-              <div className="flex items-center gap-1.5 text-xs text-emerald-100 font-medium">
-                <span>0 ₫</span>
+              {/* Tổng số tiền món đã thêm */}
+              <div className="flex items-center gap-1.5 text-xs text-emerald-100 font-bold">
+                <span>{cartTotal > 0 ? formatPriceVND(cartTotal) : "0 ₫"}</span>
                 <svg
                   className="w-4 h-4 stroke-current"
                   fill="none"
@@ -387,6 +532,305 @@ export default function MenuPage() {
             </button>
           </div>
         </footer>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* TASK 4: MODAL / BOTTOM SHEET CHI TIẾT VÀ TÙY CHỌN MÓN              */}
+        {/* ------------------------------------------------------------------ */}
+        {selectedProduct && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+            {/* Lớp nền làm mờ (Backdrop Blur) */}
+            <div
+              onClick={handleCloseModal}
+              className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm transition-opacity duration-300"
+            />
+
+            {/* Khung Bottom Sheet trượt từ dưới lên */}
+            <div className="relative z-10 w-full max-w-md bg-[#FCFBF8] rounded-t-3xl sm:rounded-3xl shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom duration-300">
+              {/* Thanh gạt nhỏ trên cùng phong cách Bottom Sheet */}
+              <div className="pt-2 pb-1 flex justify-center sm:hidden">
+                <span className="w-12 h-1 bg-stone-300 rounded-full" />
+              </div>
+
+              {/* Nút Đóng '✕ Đóng' góc trên bên phải */}
+              <button
+                type="button"
+                onClick={handleCloseModal}
+                className="absolute top-3 right-3 z-20 flex items-center gap-1 px-3 py-1.5 rounded-full bg-stone-900/70 hover:bg-stone-900 text-white text-xs font-medium backdrop-blur-md shadow-md active:scale-95 transition-all"
+                aria-label="Đóng cửa sổ tùy chọn"
+              >
+                <span>✕</span>
+                <span>Đóng</span>
+              </button>
+
+              {/* VÙNG CUỘN NỘI DUNG TÙY CHỌN */}
+              <div className="flex-1 overflow-y-auto px-4 pb-6 pt-1">
+                {/* 1. ẢNH LỚN SẢN PHẨM */}
+                <div className="relative w-full h-56 rounded-2xl overflow-hidden shadow-sm bg-stone-100 mb-3.5">
+                  <img
+                    src={selectedProduct.imageUrl}
+                    alt={selectedProduct.name}
+                    className="w-full h-full object-cover"
+                  />
+                  {selectedProduct.category && (
+                    <span className="absolute bottom-3 left-3 bg-emerald-900/85 backdrop-blur-xs text-white text-[11px] font-semibold px-2.5 py-1 rounded-full shadow-xs">
+                      {selectedProduct.category}
+                    </span>
+                  )}
+                </div>
+
+                {/* 2. TÊN MÓN VÀ GIÁ CƠ SỞ */}
+                <div className="mb-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <h2 className="text-xl font-bold text-stone-900 font-serif">
+                      {selectedProduct.name}
+                    </h2>
+                    <span className="text-base font-extrabold text-emerald-900 whitespace-nowrap">
+                      {formatPriceVND(selectedProduct.price)}
+                    </span>
+                  </div>
+                  {selectedProduct.description && (
+                    <p className="text-xs text-stone-600 mt-1 leading-relaxed">
+                      {selectedProduct.description}
+                    </p>
+                  )}
+                </div>
+
+                {/* 3. TÙY CHỌN KÍCH CỠ (SIZE) - 3 NÚT BẤM DẠNG PILL */}
+                <div className="mb-5 bg-white p-3.5 rounded-2xl border border-stone-200/80 shadow-xs">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
+                      <span>Kích cỡ (Size)</span>
+                      <span className="text-[10px] text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded font-normal lowercase">
+                        bắt buộc
+                      </span>
+                    </label>
+                    <span className="text-[11px] text-stone-500">
+                      Chọn 1 loại
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {SIZE_OPTIONS.map((size) => {
+                      const isSelected = selectedSize.id === size.id;
+                      return (
+                        <button
+                          key={size.id}
+                          type="button"
+                          onClick={() => setSelectedSize(size)}
+                          className={`py-2 px-1 rounded-xl text-center border transition-all duration-200 flex flex-col items-center justify-center ${
+                            isSelected
+                              ? "bg-emerald-800 border-emerald-800 text-white shadow-sm ring-2 ring-emerald-700/20"
+                              : "bg-stone-50/70 border-stone-200 hover:border-emerald-300 text-stone-700 hover:bg-stone-100/70"
+                          }`}
+                        >
+                          <span
+                            className={`text-xs font-bold ${
+                              isSelected ? "text-white" : "text-stone-800"
+                            }`}
+                          >
+                            {size.name}
+                          </span>
+                          <span
+                            className={`text-[10px] mt-0.5 ${
+                              isSelected ? "text-emerald-100" : "text-stone-500"
+                            }`}
+                          >
+                            +{formatPriceVND(size.extraPrice)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 4. TÙY CHỌN TOPPING (CHECKBOX ĐA CHỌN) */}
+                <div className="mb-2 bg-white p-3.5 rounded-2xl border border-stone-200/80 shadow-xs">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
+                      <span>Topping thêm</span>
+                      <span className="text-[10px] text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded font-normal lowercase">
+                        tùy chọn
+                      </span>
+                    </label>
+                    <span className="text-[11px] text-stone-500">
+                      Đa chọn
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {TOPPING_OPTIONS.map((topping) => {
+                      const isChecked = selectedToppings.includes(topping.id);
+                      return (
+                        <label
+                          key={topping.id}
+                          onClick={() => handleToggleTopping(topping.id)}
+                          className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer select-none transition-all duration-200 ${
+                            isChecked
+                              ? "bg-emerald-50/60 border-emerald-400 text-emerald-950"
+                              : "bg-stone-50/70 border-stone-200 hover:border-stone-300 text-stone-700"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {/* Ô checkbox cách điệu */}
+                            <div
+                              className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all ${
+                                isChecked
+                                  ? "bg-emerald-800 border-emerald-800 text-white"
+                                  : "border-stone-300 bg-white"
+                              }`}
+                            >
+                              {isChecked && (
+                                <svg
+                                  className="w-3.5 h-3.5 stroke-current"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  strokeWidth="3"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                              )}
+                            </div>
+                            <span className="text-xs font-semibold">
+                              {topping.name}
+                            </span>
+                          </div>
+
+                          <span
+                            className={`text-xs font-bold ${
+                              isChecked
+                                ? "text-emerald-900"
+                                : "text-amber-900/80"
+                            }`}
+                          >
+                            +{formatPriceVND(topping.extraPrice)}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* FOOTER CỐ ĐỊNH TRONG MODAL: NÚT THÊM VÀO GIỎ VỚI ĐƠN GIÁ ĐỘNG */}
+              <div className="p-3.5 border-t border-stone-200/80 bg-white/95 backdrop-blur-sm">
+                <button
+                  type="button"
+                  onClick={handleAddToCart}
+                  className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all flex items-center justify-between"
+                >
+                  <span className="text-sm">Thêm vào giỏ</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm tracking-wide text-emerald-100 font-extrabold">
+                      {formatPriceVND(calculateTotalPrice())}
+                    </span>
+                    <svg
+                      className="w-4 h-4 stroke-current"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                      <polyline points="12 5 19 12 12 19" />
+                    </svg>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------------ */}
+        {/* MODAL / DIALOG POPUP THÔNG BÁO THÀNH CÔNG (CĂN GIỮA MÀN HÌNH)      */}
+        {/* ------------------------------------------------------------------ */}
+        {addedItemSummary && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Lớp nền làm mờ (Backdrop Blur) */}
+            <div
+              onClick={handleCloseSuccessModal}
+              className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm transition-opacity duration-300"
+            />
+
+            {/* Khung Popup màu trắng bo góc tròn đẹp rounded-3xl, shadow-2xl */}
+            <div className="relative z-10 w-full max-w-sm bg-[#FCFBF8] rounded-3xl shadow-2xl border border-stone-200/80 p-6 flex flex-col items-center animate-in fade-in zoom-in-95 duration-200">
+              {/* Biểu tượng dấu tích xanh rêu bo tròn trên cùng */}
+              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center mb-3 shadow-inner">
+                <svg
+                  className="w-8 h-8 stroke-current"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="2.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+
+              {/* Tiêu đề thông báo thành công */}
+              <h3 className="text-lg font-extrabold text-stone-900 font-serif text-center">
+                Thêm vào giỏ thành công!
+              </h3>
+              <p className="text-xs text-stone-500 mt-0.5 text-center">
+                Món của bạn đã được cập nhật vào giỏ hàng
+              </p>
+
+              {/* Bảng tóm tắt đơn hàng (Summary Card) */}
+              <div className="w-full bg-stone-50 rounded-2xl p-4 border border-stone-200/70 mt-4 mb-5 space-y-2.5 text-xs text-stone-700">
+                {/* Dòng 1: Món */}
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-500">Món:</span>
+                  <span className="font-bold text-stone-900 text-sm">
+                    {addedItemSummary.productName}
+                  </span>
+                </div>
+
+                {/* Dòng 2: Kích cỡ */}
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-500">Kích cỡ:</span>
+                  <span className="font-semibold text-stone-800">
+                    {addedItemSummary.sizeName}
+                    {addedItemSummary.sizeExtraPrice > 0 && (
+                      <span className="text-stone-500 font-normal ml-1">
+                        (+{formatPriceVND(addedItemSummary.sizeExtraPrice)})
+                      </span>
+                    )}
+                  </span>
+                </div>
+
+                {/* Dòng 3: Topping */}
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-stone-500 whitespace-nowrap">Topping:</span>
+                  <span className="font-semibold text-stone-800 text-right">
+                    {addedItemSummary.toppings.length > 0
+                      ? addedItemSummary.toppings.join(", ")
+                      : "Không có"}
+                  </span>
+                </div>
+
+                {/* Đường phân cách */}
+                <div className="pt-2 border-t border-stone-200/80 flex items-center justify-between">
+                  <span className="font-bold text-stone-800">Tổng tiền:</span>
+                  <span className="text-base font-extrabold text-emerald-900">
+                    {formatPriceVND(addedItemSummary.totalPrice)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Nút bấm 'Tiếp tục chọn món' màu xanh rêu */}
+              <button
+                type="button"
+                onClick={handleCloseSuccessModal}
+                className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all text-sm"
+              >
+                Tiếp tục chọn món
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
