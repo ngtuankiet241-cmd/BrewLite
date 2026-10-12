@@ -46,12 +46,18 @@ export interface AddedCartItemSummary {
   sizeName: string;
   sizeExtraPrice: number;
   toppings: string[];
+  quantity: number;
   totalPrice: number;
 }
 
 // ============================================================================
 // 2. DỮ LIỆU MẪU (MOCK DATA)
 // ============================================================================
+
+/**
+ * Danh sách các danh mục thức uống để lọc
+ */
+export const CATEGORIES = ["Tất cả", "Cà phê", "Trà trái cây"] as const;
 
 /**
  * Mảng dữ liệu mẫu gồm 4 món đặc trưng theo yêu cầu đề bài
@@ -144,6 +150,9 @@ export default function MenuPage() {
   // Trạng thái đang tải (Loading state cho DoD)
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Danh mục đang được chọn để lọc (Tất cả, Cà phê, Trà trái cây)
+  const [selectedCategory, setSelectedCategory] = useState<string>("Tất cả");
+
   // Quản lý giỏ hàng: số lượng món và tổng số tiền tích lũy
   const [cartCount, setCartCount] = useState<number>(0);
   const [cartTotal, setCartTotal] = useState<number>(0);
@@ -157,6 +166,8 @@ export default function MenuPage() {
   const [selectedSize, setSelectedSize] = useState<SizeOption>(SIZE_OPTIONS[0]);
   // Danh sách ID của các topping đã tick chọn (checkbox đa chọn)
   const [selectedToppings, setSelectedToppings] = useState<string[]>([]);
+  // Số lượng món được chọn (mặc định là 1)
+  const [quantity, setQuantity] = useState<number>(1);
 
   // --------------------------------------------------------------------------
   // STATE CHO MODAL THÔNG BÁO THÀNH CÔNG (SUCCESS DIALOG POPUP)
@@ -184,12 +195,13 @@ export default function MenuPage() {
 
   /**
    * Mở Modal Chi tiết & tùy chọn khi click vào món
-   * Khởi tạo lại các tùy chọn mặc định (Size S, chưa chọn topping nào)
+   * Khởi tạo lại các tùy chọn mặc định (Size S, chưa chọn topping nào, số lượng = 1)
    */
   const handleOpenDetailModal = (product: Product) => {
     setSelectedProduct(product);
     setSelectedSize(SIZE_OPTIONS[0]);
     setSelectedToppings([]);
+    setQuantity(1);
   };
 
   /**
@@ -197,6 +209,21 @@ export default function MenuPage() {
    */
   const handleCloseModal = () => {
     setSelectedProduct(null);
+  };
+
+  /**
+   * Xử lý giảm số lượng (tối thiểu là 1)
+   */
+  const handleDecreaseQuantity = () => {
+    setQuantity((prev) => Math.max(1, prev - 1));
+  };
+
+  /**
+   * Xử lý tăng số lượng (tối đa không vượt quá tồn kho stock của sản phẩm)
+   */
+  const handleIncreaseQuantity = () => {
+    if (!selectedProduct) return;
+    setQuantity((prev) => Math.min(selectedProduct.stock, prev + 1));
   };
 
   /**
@@ -211,10 +238,10 @@ export default function MenuPage() {
   };
 
   /**
-   * TÍNH TOÁN ĐƠN GIÁ ĐỘNG (Dynamic Price Calculation):
+   * TÍNH TOÁN ĐƠN GIÁ 1 LY:
    * Công thức: Giá gốc + Giá size + Giá các topping đã tick
    */
-  const calculateTotalPrice = (): number => {
+  const calculateUnitPrice = (): number => {
     if (!selectedProduct) return 0;
     const basePrice = selectedProduct.price;
     const sizePrice = selectedSize.extraPrice;
@@ -227,8 +254,16 @@ export default function MenuPage() {
   };
 
   /**
+   * TÍNH TOÁN TỔNG TIỀN ĐỘNG (Dynamic Total Price Calculation):
+   * Công thức: (Giá gốc + Giá size + Topping) * Số lượng
+   */
+  const calculateTotalPrice = (): number => {
+    return calculateUnitPrice() * quantity;
+  };
+
+  /**
    * Xử lý khi nhấn nút "Thêm vào giỏ" trong Modal:
-   * Thay thế alert() thô sơ bằng việc mở Modal Popup Thông Báo Thành Công xịn sò
+   * Cập nhật đúng số lượng & tổng tiền, mở Modal Popup Thông Báo Thành Công
    */
   const handleAddToCart = () => {
     if (!selectedProduct) return;
@@ -244,11 +279,12 @@ export default function MenuPage() {
       sizeName: selectedSize.name,
       sizeExtraPrice: selectedSize.extraPrice,
       toppings: toppingNames,
+      quantity: quantity,
       totalPrice: totalPrice,
     });
 
     // 2. Cập nhật số lượng và tổng tiền giỏ hàng ở Bottom bar
-    setCartCount((prev) => prev + 1);
+    setCartCount((prev) => prev + quantity);
     setCartTotal((prev) => prev + totalPrice);
 
     // 3. Đóng Bottom Sheet chi tiết món
@@ -275,21 +311,29 @@ export default function MenuPage() {
     }
   };
 
+  /**
+   * Lọc danh sách sản phẩm theo danh mục được chọn
+   */
+  const displayedProducts =
+    selectedCategory === "Tất cả"
+      ? products
+      : products.filter((item) => item.category === selectedCategory);
+
   return (
-    // Bố cục tổng thể: Nền xám/ấm sáng sủa, căn giữa màn hình chuẩn Mobile-First (max-w-md)
-    <div className="min-h-screen bg-stone-100 flex justify-center text-stone-800 antialiased selection:bg-emerald-100 selection:text-emerald-900">
-      <main className="w-full max-w-md min-h-screen bg-[#FCFBF8] shadow-xl flex flex-col relative pb-28">
+    // Bố cục tổng thể: Nền xám/ấm sáng sủa, căn giữa màn hình chuẩn Mobile-First (max-w-md), font-sans hiện đại
+    <div className="min-h-screen bg-stone-100 flex justify-center text-stone-800 antialiased font-sans selection:bg-emerald-100 selection:text-emerald-900">
+      <main className="w-full max-w-md min-h-screen bg-[#FCFBF8] shadow-xl flex flex-col relative pb-36">
         {/* ------------------------------------------------------------------ */}
         {/* HEADER: Tên quán, Subtitle và Icon Menu                             */}
         {/* ------------------------------------------------------------------ */}
         <header className="sticky top-0 z-20 bg-[#FCFBF8]/90 backdrop-blur-md border-b border-stone-200/70 px-4 py-3.5 transition-all">
           <div className="flex items-center justify-between">
-            {/* Nhánh bên trái: Tên thương hiệu & Subtitle */}
+            {/* Nhánh bên trái: Tên thương hiệu & Subtitle (dùng font-sans hiện đại) */}
             <div>
               <div className="flex items-center gap-1.5">
                 {/* Chấm tròn nhận diện thương hiệu tone xanh rêu */}
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block animate-pulse" />
-                <h1 className="text-xl font-extrabold tracking-tight text-emerald-950 font-serif">
+                <h1 className="text-xl font-bold tracking-tight text-emerald-950 font-sans">
                   BrewLite
                 </h1>
               </div>
@@ -349,9 +393,74 @@ export default function MenuPage() {
         </header>
 
         {/* ------------------------------------------------------------------ */}
+        {/* BANNER CHÀO MỪNG SANG TRỌNG TONE XANH RÊU                          */}
+        {/* ------------------------------------------------------------------ */}
+        <div className="px-3.5 pt-3">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-900 via-emerald-800 to-teal-950 p-4 text-white shadow-md shadow-emerald-950/15">
+            {/* Hiệu ứng đốm sáng trang trí mờ ảo */}
+            <div className="absolute -right-6 -bottom-6 w-28 h-28 bg-emerald-400/20 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute top-0 right-10 w-16 h-16 bg-amber-400/10 rounded-full blur-xl pointer-events-none" />
+
+            <div className="relative z-10 flex items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-700/50 backdrop-blur-xs border border-emerald-500/30 text-[10px] font-semibold text-emerald-200 tracking-wide uppercase">
+                  <span>✦</span> BrewLite Special
+                </div>
+                <p className="text-sm sm:text-base font-semibold leading-snug tracking-tight text-white max-w-[220px]">
+                  Thưởng thức tách cà phê đậm vị mỗi ngày
+                </p>
+              </div>
+
+              {/* Icon tách cà phê sang trọng */}
+              <div className="flex-shrink-0 w-11 h-11 rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center text-amber-200 shadow-inner">
+                <svg
+                  className="w-6 h-6 stroke-current"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
+                  <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
+                  <line x1="6" y1="1" x2="6" y2="4" />
+                  <line x1="10" y1="1" x2="10" y2="4" />
+                  <line x1="14" y1="1" x2="14" y2="4" />
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* THANH LỌC DANH MỤC CUỘN NGANG (CATEGORY TABS)                      */}
+        {/* ------------------------------------------------------------------ */}
+        <div className="px-3.5 pt-3 pb-1">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+            {CATEGORIES.map((category) => {
+              const isActive = selectedCategory === category;
+              return (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => setSelectedCategory(category)}
+                  className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+                    isActive
+                      ? "bg-emerald-800 text-white shadow-sm shadow-emerald-900/30 scale-100"
+                      : "bg-white text-stone-600 border border-stone-200/80 hover:bg-stone-50 hover:text-stone-900 active:scale-95"
+                  }`}
+                >
+                  {category}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ------------------------------------------------------------------ */}
         {/* NỘI DUNG CHÍNH: LƯỚI SẢN PHẨM HOẶC TRẠNG THÁI SKELETON / EMPTY       */}
         {/* ------------------------------------------------------------------ */}
-        <section className="flex-1 px-3.5 pt-4">
+        <section className="flex-1 px-3.5 pt-3">
           {/* TRƯỜNG HỢP 1: LOADING STATE (Hiệu ứng Skeleton nhấp nháy animate-pulse) */}
           {isLoading && (
             <div>
@@ -368,7 +477,7 @@ export default function MenuPage() {
                     className="bg-white rounded-2xl p-2.5 shadow-sm border border-stone-200/60 flex flex-col animate-pulse"
                   >
                     {/* Skeleton khung ảnh */}
-                    <div className="w-full aspect-square bg-stone-200 rounded-xl mb-2.5" />
+                    <div className="w-full aspect-square bg-stone-200 rounded-2xl mb-2.5" />
                     {/* Skeleton tên món */}
                     <div className="h-4 bg-stone-200 rounded w-4/5 mb-1.5" />
                     {/* Skeleton giá tiền */}
@@ -399,7 +508,7 @@ export default function MenuPage() {
                   <line x1="14" y1="1" x2="14" y2="4" />
                 </svg>
               </div>
-              <h2 className="text-base font-bold text-stone-800">
+              <h2 className="text-base font-bold tracking-tight text-stone-800">
                 Chưa có món nào hôm nay
               </h2>
               <p className="text-xs text-stone-500 mt-1 max-w-[220px]">
@@ -421,61 +530,79 @@ export default function MenuPage() {
               {/* Tiêu đề nhóm thực đơn */}
               <div className="flex items-center justify-between mb-3 px-1">
                 <span className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
-                  Món nổi bật ({products.length})
+                  {selectedCategory === "Tất cả"
+                    ? `Món nổi bật (${displayedProducts.length})`
+                    : `${selectedCategory} (${displayedProducts.length})`}
                 </span>
                 <span className="text-[11px] text-stone-600">
                   Chạm để tùy chọn món
                 </span>
               </div>
 
-              {/* Lưới sản phẩm 2 cột */}
-              <div className="grid grid-cols-2 gap-3">
-                {products.map((product) => (
-                  <article
-                    key={product.id}
-                    onClick={() => handleOpenDetailModal(product)}
-                    className="group bg-white rounded-2xl p-2.5 shadow-sm border border-stone-200/70 hover:border-emerald-300 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col active:scale-[0.98] select-none"
+              {/* Hiển thị khi danh mục lọc không có món */}
+              {displayedProducts.length === 0 ? (
+                <div className="py-12 px-4 text-center bg-white rounded-2xl border border-stone-200/70">
+                  <p className="text-xs text-stone-500">
+                    Không tìm thấy món nào trong danh mục này.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory("Tất cả")}
+                    className="mt-3 text-xs font-semibold text-emerald-800 underline underline-offset-2"
                   >
-                    {/* Khung ảnh món ăn bo góc rounded-2xl */}
-                    <div className="relative w-full aspect-square overflow-hidden rounded-xl bg-stone-100 mb-2.5">
-                      <img
-                        src={product.imageUrl}
-                        alt={product.name}
-                        loading="lazy"
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-                      {/* Tag số lượng có sẵn nhẹ nhàng */}
-                      <span className="absolute top-2 right-2 bg-stone-900/65 backdrop-blur-xs text-white text-[10px] font-medium px-2 py-0.5 rounded-full shadow-xs">
-                        Còn {product.stock}
-                      </span>
-                    </div>
-
-                    {/* Tên món và giá tiền */}
-                    <div className="flex-1 flex flex-col justify-between">
-                      <div>
-                        <h2 className="text-sm font-semibold text-stone-900 line-clamp-1 group-hover:text-emerald-900 transition-colors">
-                          {product.name}
-                        </h2>
-                        {product.description && (
-                          <p className="text-[11px] text-stone-600 line-clamp-1 mt-0.5 leading-tight">
-                            {product.description}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="mt-2.5 pt-1.5 border-t border-stone-100 flex items-center justify-between">
-                        <span className="text-xs font-bold text-emerald-900">
-                          {formatPriceVND(product.price)}
-                        </span>
-                        {/* Nút cộng nhỏ trang trí */}
-                        <span className="w-6 h-6 rounded-full bg-emerald-50 text-emerald-800 flex items-center justify-center text-xs font-bold group-hover:bg-emerald-800 group-hover:text-white transition-colors">
-                          +
+                    Xem tất cả món
+                  </button>
+                </div>
+              ) : (
+                /* Lưới sản phẩm 2 cột */
+                <div className="grid grid-cols-2 gap-3">
+                  {displayedProducts.map((product) => (
+                    <article
+                      key={product.id}
+                      onClick={() => handleOpenDetailModal(product)}
+                      className="group bg-white rounded-2xl p-2.5 shadow-sm hover:shadow-md border border-stone-200/70 hover:border-emerald-300 transition-all duration-200 cursor-pointer flex flex-col active:scale-[0.98] select-none"
+                    >
+                      {/* Khung ảnh món ăn bo góc rounded-2xl */}
+                      <div className="relative w-full aspect-square overflow-hidden rounded-2xl bg-stone-100 mb-2.5">
+                        <img
+                          src={product.imageUrl}
+                          alt={product.name}
+                          loading="lazy"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        {/* Tag số lượng có sẵn thanh thoát */}
+                        <span className="absolute top-2 right-2 bg-black/45 backdrop-blur-md text-white text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/10 shadow-xs">
+                          Còn {product.stock}
                         </span>
                       </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
+
+                      {/* Tên món và giá tiền */}
+                      <div className="flex-1 flex flex-col justify-between">
+                        <div>
+                          <h2 className="text-sm font-semibold tracking-tight text-stone-900 line-clamp-1 group-hover:text-emerald-900 transition-colors">
+                            {product.name}
+                          </h2>
+                          {product.description && (
+                            <p className="text-[11px] text-stone-600 line-clamp-1 mt-0.5 leading-tight">
+                              {product.description}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="mt-2.5 pt-1.5 border-t border-stone-100 flex items-center justify-between">
+                          <span className="text-xs font-bold text-emerald-900">
+                            {formatPriceVND(product.price)}
+                          </span>
+                          {/* Nút cộng nhỏ trang trí với hiệu ứng đổ bóng khi hover */}
+                          <span className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-800 flex items-center justify-center text-sm font-bold shadow-xs group-hover:bg-emerald-800 group-hover:text-white group-hover:shadow-md group-hover:shadow-emerald-900/30 group-hover:scale-105 transition-all duration-200">
+                            +
+                          </span>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -510,7 +637,7 @@ export default function MenuPage() {
                     {cartCount}
                   </span>
                 </div>
-                <span className="text-sm tracking-wide">
+                <span className="text-sm font-semibold tracking-wide">
                   Xem giỏ hàng ({cartCount})
                 </span>
               </div>
@@ -578,10 +705,10 @@ export default function MenuPage() {
                   )}
                 </div>
 
-                {/* 2. TÊN MÓN VÀ GIÁ CƠ SỞ */}
+                {/* 2. TÊN MÓN VÀ GIÁ CƠ SỞ (phông không chân hiện đại) */}
                 <div className="mb-4">
                   <div className="flex items-start justify-between gap-2">
-                    <h2 className="text-xl font-bold text-stone-900 font-serif">
+                    <h2 className="text-xl font-bold tracking-tight text-stone-900 font-sans">
                       {selectedProduct.name}
                     </h2>
                     <span className="text-base font-extrabold text-emerald-900 whitespace-nowrap">
@@ -713,14 +840,54 @@ export default function MenuPage() {
                 </div>
               </div>
 
-              {/* FOOTER CỐ ĐỊNH TRONG MODAL: NÚT THÊM VÀO GIỎ VỚI ĐƠN GIÁ ĐỘNG */}
-              <div className="p-3.5 border-t border-stone-200/80 bg-white/95 backdrop-blur-sm">
+              {/* FOOTER CỐ ĐỊNH TRONG MODAL: BỘ CHỌN SỐ LƯỢNG & NÚT THÊM VÀO GIỎ */}
+              <div className="p-3.5 border-t border-stone-200/80 bg-white/95 backdrop-blur-sm space-y-3">
+                {/* KHỐI BỘ CHỌN SỐ LƯỢNG (QUANTITY STEPPER) */}
+                <div className="flex items-center justify-between px-1">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-950 block">
+                      Số lượng
+                    </span>
+                    <span className="text-[11px] text-stone-500">
+                      Còn {selectedProduct.stock} món trong kho
+                    </span>
+                  </div>
+
+                  {/* Nút - / Số lượng / Nút + dạng Stepper bo tròn */}
+                  <div className="flex items-center gap-2.5 bg-stone-100 p-1 rounded-2xl border border-stone-200/80">
+                    <button
+                      type="button"
+                      disabled={quantity <= 1}
+                      onClick={handleDecreaseQuantity}
+                      aria-label="Giảm số lượng"
+                      className="w-8 h-8 rounded-xl bg-white border border-stone-200 text-stone-800 flex items-center justify-center font-bold text-base shadow-xs disabled:opacity-35 disabled:cursor-not-allowed hover:bg-stone-50 active:scale-95 transition-all"
+                    >
+                      −
+                    </button>
+                    <span className="w-6 text-center text-sm font-bold text-stone-900 select-none">
+                      {quantity}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={quantity >= selectedProduct.stock}
+                      onClick={handleIncreaseQuantity}
+                      aria-label="Tăng số lượng"
+                      className="w-8 h-8 rounded-xl bg-white border border-stone-200 text-stone-800 flex items-center justify-center font-bold text-base shadow-xs disabled:opacity-35 disabled:cursor-not-allowed hover:bg-stone-50 active:scale-95 transition-all"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* NÚT THÊM VÀO GIỎ VỚI ĐƠN GIÁ ĐÃ NHÂN SỐ LƯỢNG */}
                 <button
                   type="button"
                   onClick={handleAddToCart}
                   className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all flex items-center justify-between"
                 >
-                  <span className="text-sm">Thêm vào giỏ</span>
+                  <span className="text-sm">
+                    Thêm vào giỏ • {quantity} {quantity > 1 ? "ly" : "món"}
+                  </span>
                   <div className="flex items-center gap-2">
                     <span className="text-sm tracking-wide text-emerald-100 font-extrabold">
                       {formatPriceVND(calculateTotalPrice())}
@@ -770,8 +937,8 @@ export default function MenuPage() {
                 </svg>
               </div>
 
-              {/* Tiêu đề thông báo thành công */}
-              <h3 className="text-lg font-extrabold text-stone-900 font-serif text-center">
+              {/* Tiêu đề thông báo thành công (font-sans hiện đại) */}
+              <h3 className="text-lg font-bold tracking-tight text-stone-900 font-sans text-center">
                 Thêm vào giỏ thành công!
               </h3>
               <p className="text-xs text-stone-500 mt-0.5 text-center">
@@ -783,7 +950,7 @@ export default function MenuPage() {
                 {/* Dòng 1: Món */}
                 <div className="flex items-center justify-between">
                   <span className="text-stone-500">Món:</span>
-                  <span className="font-bold text-stone-900 text-sm">
+                  <span className="font-bold tracking-tight text-stone-900 text-sm">
                     {addedItemSummary.productName}
                   </span>
                 </div>
@@ -808,6 +975,14 @@ export default function MenuPage() {
                     {addedItemSummary.toppings.length > 0
                       ? addedItemSummary.toppings.join(", ")
                       : "Không có"}
+                  </span>
+                </div>
+
+                {/* Dòng 4: Số lượng */}
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-500">Số lượng:</span>
+                  <span className="font-semibold text-stone-800">
+                    {addedItemSummary.quantity} ly
                   </span>
                 </div>
 
