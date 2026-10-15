@@ -1,22 +1,28 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 // ============================================================================
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES & INTERFACES)
 // ============================================================================
 
 /**
- * Interface đại diện cho thông tin một sản phẩm đồ uống trong menu BrewLite
+ * Interface dữ liệu trả về từ Backend NestJS API (GET /products)
  */
-export interface Product {
+export interface BackendProduct {
   id: string;
   name: string;
   price: number;
   imageUrl: string;
+}
+
+/**
+ * Interface sản phẩm đồ uống trong menu BrewLite mở rộng cho Frontend
+ */
+export interface Product extends BackendProduct {
+  category: string;
   stock: number;
   description?: string;
-  category?: string;
 }
 
 /**
@@ -39,7 +45,6 @@ export interface ToppingOption {
 
 /**
  * Interface lưu thông tin tóm tắt món vừa thêm vào giỏ hàng
- * Dùng để hiển thị Popup Modal thông báo thành công xịn sò
  */
 export interface AddedCartItemSummary {
   productName: string;
@@ -51,7 +56,7 @@ export interface AddedCartItemSummary {
 }
 
 // ============================================================================
-// 2. DỮ LIỆU MẪU (MOCK DATA)
+// 2. DANH MỤC & CẤU HÌNH TÙY CHỌN (OPTIONS)
 // ============================================================================
 
 /**
@@ -60,68 +65,20 @@ export interface AddedCartItemSummary {
 export const CATEGORIES = ["Tất cả", "Cà phê", "Trà trái cây"] as const;
 
 /**
- * Mảng dữ liệu mẫu gồm 4 món đặc trưng theo yêu cầu đề bài
- * Link ảnh Unsplash được tuyển chọn kỹ lưỡng, chất lượng cao về cà phê và trà
- */
-export const MOCK_PRODUCTS: Product[] = [
-  {
-    id: "brew-01",
-    name: "Cà phê sữa",
-    price: 35000,
-    imageUrl:
-      "https://images.unsplash.com/photo-1517256064527-09c73fc73e38?auto=format&fit=crop&w=600&q=80",
-    stock: 25,
-    description: "Cà phê Robusta đậm vị hòa quyện sữa đặc béo ngậy truyền thống",
-    category: "Cà phê",
-  },
-  {
-    id: "brew-02",
-    name: "Americano",
-    price: 40000,
-    imageUrl:
-      "https://images.unsplash.com/photo-1551030173-122aabc4489c?auto=format&fit=crop&w=600&q=80",
-    stock: 18,
-    description: "Espresso pha loãng với nước tinh khiết, thanh nhẹ và sảng khoái",
-    category: "Cà phê",
-  },
-  {
-    id: "brew-03",
-    name: "Cappuccino",
-    price: 45000,
-    imageUrl:
-      "https://images.unsplash.com/photo-1534778101976-62847782c213?auto=format&fit=crop&w=600&q=80",
-    stock: 12,
-    description: "Sự cân bằng tinh tế giữa espresso, sữa nóng và bọt sữa mịn màng",
-    category: "Cà phê",
-  },
-  {
-    id: "brew-04",
-    name: "Trà đào",
-    price: 39000,
-    imageUrl:
-      "https://images.unsplash.com/photo-1556679343-c7306c1976bc?auto=format&fit=crop&w=600&q=80",
-    stock: 20,
-    description: "Trà ủ lạnh thơm nồng kết hợp miếng đào giòn ngọt mát lạnh",
-    category: "Trà trái cây",
-  },
-];
-
-/**
- * Danh sách tùy chọn kích cỡ (Size):
- * Size S (+0₫), Size M (+5.000₫), Size L (+10.000₫)
+ * Danh sách tùy chọn kích cỡ (Size): Nhỏ, Vừa, Lớn
  */
 export const SIZE_OPTIONS: SizeOption[] = [
-  { id: "S", name: "Size S", extraPrice: 0 },
-  { id: "M", name: "Size M", extraPrice: 5000 },
-  { id: "L", name: "Size L", extraPrice: 10000 },
+  { id: "S", name: "Nhỏ", extraPrice: 0 },
+  { id: "M", name: "Vừa", extraPrice: 5000 },
+  { id: "L", name: "Lớn", extraPrice: 10000 },
 ];
 
 /**
- * Danh sách tùy chọn Topping đa chọn (Checkbox):
- * Trân châu (+10.000₫), Kem Cheese (+10.000₫)
+ * Danh sách tùy chọn Topping: Trân châu trắng, Thạch nha đam, Kem Cheese...
  */
 export const TOPPING_OPTIONS: ToppingOption[] = [
-  { id: "boba", name: "Trân châu", extraPrice: 10000 },
+  { id: "white_pearl", name: "Trân châu trắng", extraPrice: 10000 },
+  { id: "aloe_vera", name: "Thạch nha đam", extraPrice: 10000 },
   { id: "cheese", name: "Kem Cheese", extraPrice: 10000 },
 ];
 
@@ -145,10 +102,12 @@ const formatPriceVND = (price: number): string => {
 // ============================================================================
 
 export default function MenuPage() {
-  // Quản lý danh sách sản phẩm hiện tại
+  // Quản lý danh sách sản phẩm lấy từ Backend API
   const [products, setProducts] = useState<Product[]>([]);
-  // Trạng thái đang tải (Loading state cho DoD)
+  // Trạng thái đang tải dữ liệu (Loading)
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  // Trạng thái lỗi khi gọi API (Error)
+  const [error, setError] = useState<string | null>(null);
 
   // Danh mục đang được chọn để lọc (Tất cả, Cà phê, Trà trái cây)
   const [selectedCategory, setSelectedCategory] = useState<string>("Tất cả");
@@ -158,11 +117,11 @@ export default function MenuPage() {
   const [cartTotal, setCartTotal] = useState<number>(0);
 
   // --------------------------------------------------------------------------
-  // STATE CHO TASK 4: MODAL CHI TIẾT & TÙY CHỌN MÓN
+  // STATE CHO MODAL CHI TIẾT & TÙY CHỌN MÓN
   // --------------------------------------------------------------------------
   // Sản phẩm đang được chọn mở modal tùy chọn (null nếu modal đóng)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  // Kích cỡ được chọn (mặc định là Size S)
+  // Kích cỡ được chọn (mặc định là Size Nhỏ)
   const [selectedSize, setSelectedSize] = useState<SizeOption>(SIZE_OPTIONS[0]);
   // Danh sách ID của các topping đã tick chọn (checkbox đa chọn)
   const [selectedToppings, setSelectedToppings] = useState<string[]>([]);
@@ -176,26 +135,64 @@ export default function MenuPage() {
     useState<AddedCartItemSummary | null>(null);
 
   /**
-   * Giả lập hiệu ứng tải dữ liệu từ API khi vào trang (700ms)
-   * Nhằm minh họa Skeleton Loading theo tiêu chí nghiệm thu DoD
+   * Gọi API NestJS tại http://localhost:3001/products
+   * Phân loại category theo tên:
+   *  - Chứa "trà" hoặc "tea" -> 'Trà trái cây'
+   *  - Còn lại -> 'Cà phê'
    */
-  useEffect(() => {
-    loadMockData();
+  const fetchProducts = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch("http://localhost:3001/products");
+
+      if (!response.ok) {
+        throw new Error(
+          `Không thể tải thực đơn (Mã lỗi ${response.status}: ${response.statusText})`
+        );
+      }
+
+      const data: BackendProduct[] = await response.json();
+
+      // Bổ sung category theo tên và thiết lập giá trị mặc định cho stock/description
+      const mappedProducts: Product[] = data.map((item) => {
+        const lowerName = item.name.toLowerCase();
+        const isTea = lowerName.includes("trà") || lowerName.includes("tea");
+
+        return {
+          ...item,
+          category: isTea ? "Trà trái cây" : "Cà phê",
+          stock: (item as unknown as { stock?: number }).stock ?? 20,
+          description:
+            (item as unknown as { description?: string }).description ??
+            (isTea
+              ? "Trà tươi thượng hạng thanh mát, sảng khoái từng ngụm"
+              : "Hương vị cà phê Robusta & Arabica đậm đà, thơm nồng truyền thống"),
+        };
+      });
+
+      setProducts(mappedProducts);
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Không thể kết nối đến máy chủ API. Vui lòng kiểm tra NestJS backend.";
+      console.error("Lỗi khi tải dữ liệu từ Backend:", err);
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const loadMockData = () => {
-    setIsLoading(true);
-    const timer = setTimeout(() => {
-      setProducts(MOCK_PRODUCTS);
-      setIsLoading(false);
-    }, 700);
-
-    return () => clearTimeout(timer);
-  };
+  // Gọi fetch API khi component mount lần đầu
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
 
   /**
    * Mở Modal Chi tiết & tùy chọn khi click vào món
-   * Khởi tạo lại các tùy chọn mặc định (Size S, chưa chọn topping nào, số lượng = 1)
+   * Khởi tạo lại các tùy chọn mặc định (Size Nhỏ, chưa chọn topping nào, số lượng = 1)
    */
   const handleOpenDetailModal = (product: Product) => {
     setSelectedProduct(product);
@@ -223,7 +220,8 @@ export default function MenuPage() {
    */
   const handleIncreaseQuantity = () => {
     if (!selectedProduct) return;
-    setQuantity((prev) => Math.min(selectedProduct.stock, prev + 1));
+    const maxStock = selectedProduct.stock || 99;
+    setQuantity((prev) => Math.min(maxStock, prev + 1));
   };
 
   /**
@@ -287,7 +285,7 @@ export default function MenuPage() {
     setCartCount((prev) => prev + quantity);
     setCartTotal((prev) => prev + totalPrice);
 
-    // 3. Đóng Bottom Sheet chi tiết món
+    // 3. Đóng Modal chi tiết món
     handleCloseModal();
   };
 
@@ -306,7 +304,9 @@ export default function MenuPage() {
       alert("Giỏ hàng của bạn hiện đang trống (0 món).");
     } else {
       alert(
-        `Giỏ hàng của bạn:\n• Số lượng: ${cartCount} món\n• Tổng số tiền: ${formatPriceVND(cartTotal)}`
+        `Giỏ hàng của bạn:\n• Số lượng: ${cartCount} món\n• Tổng số tiền: ${formatPriceVND(
+          cartTotal
+        )}`
       );
     }
   };
@@ -328,10 +328,9 @@ export default function MenuPage() {
         {/* ------------------------------------------------------------------ */}
         <header className="sticky top-0 z-20 bg-[#FCFBF8]/90 backdrop-blur-md border-b border-stone-200/70 px-4 py-3.5 transition-all">
           <div className="flex items-center justify-between">
-            {/* Nhánh bên trái: Tên thương hiệu & Subtitle (dùng font-sans hiện đại) */}
+            {/* Nhánh bên trái: Tên thương hiệu & Subtitle */}
             <div>
               <div className="flex items-center gap-1.5">
-                {/* Chấm tròn nhận diện thương hiệu tone xanh rêu */}
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block animate-pulse" />
                 <h1 className="text-xl font-bold tracking-tight text-emerald-950 font-sans">
                   BrewLite
@@ -349,7 +348,6 @@ export default function MenuPage() {
               onClick={() => alert("Menu tùy chọn đang được phát triển")}
               className="p-2 rounded-xl text-stone-600 hover:text-emerald-900 hover:bg-stone-200/60 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
             >
-              {/* Icon 3 gạch ngang (Hamburger Menu) */}
               <svg
                 className="w-5 h-5 stroke-current"
                 fill="none"
@@ -374,16 +372,16 @@ export default function MenuPage() {
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={loadMockData}
-                className="px-2 py-0.5 rounded-md bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-[10px] font-medium transition-colors"
-                title="Giả lập hiệu ứng Skeleton khi tải lại"
+                onClick={fetchProducts}
+                className="px-2 py-0.5 rounded-md bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-[10px] font-medium transition-colors cursor-pointer"
+                title="Tải lại dữ liệu từ Backend API"
               >
-                Test Loading
+                Tải lại API
               </button>
               <button
                 type="button"
                 onClick={() => setProducts([])}
-                className="px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-medium transition-colors"
+                className="px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-medium transition-colors cursor-pointer"
                 title="Giả lập danh sách rỗng để nghiệm thu Empty state"
               >
                 Test Empty
@@ -458,7 +456,7 @@ export default function MenuPage() {
         </div>
 
         {/* ------------------------------------------------------------------ */}
-        {/* NỘI DUNG CHÍNH: LƯỚI SẢN PHẨM HOẶC TRẠNG THÁI SKELETON / EMPTY       */}
+        {/* NỘI DUNG CHÍNH: LƯỚI SẢN PHẨM HOẶC TRẠNG THÁI SKELETON/ERROR/EMPTY  */}
         {/* ------------------------------------------------------------------ */}
         <section className="flex-1 px-3.5 pt-3">
           {/* TRƯỜNG HỢP 1: LOADING STATE (Hiệu ứng Skeleton nhấp nháy animate-pulse) */}
@@ -488,11 +486,43 @@ export default function MenuPage() {
             </div>
           )}
 
-          {/* TRƯỜNG HỢP 2: EMPTY STATE (Khi danh sách sản phẩm rỗng) */}
-          {!isLoading && products.length === 0 && (
+          {/* TRƯỜNG HỢP 2: ERROR STATE (Khi có lỗi kết nối API hoặc Server) */}
+          {!isLoading && error && (
+            <div className="flex flex-col items-center justify-center py-14 px-4 text-center">
+              <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center mb-3 shadow-inner">
+                <svg
+                  className="w-8 h-8 stroke-current"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              </div>
+              <h2 className="text-base font-bold tracking-tight text-stone-900">
+                Không thể tải thực đơn
+              </h2>
+              <p className="text-xs text-stone-500 mt-1 max-w-[260px] leading-relaxed">
+                {error}
+              </p>
+              <button
+                type="button"
+                onClick={fetchProducts}
+                className="mt-4 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
+              >
+                Thử lại ngay
+              </button>
+            </div>
+          )}
+
+          {/* TRƯỜNG HỢP 3: EMPTY STATE (Khi danh sách sản phẩm rỗng) */}
+          {!isLoading && !error && products.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
               <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-900 flex items-center justify-center mb-3 shadow-inner">
-                {/* Icon tách cà phê rỗng */}
                 <svg
                   className="w-8 h-8 stroke-current"
                   fill="none"
@@ -516,16 +546,16 @@ export default function MenuPage() {
               </p>
               <button
                 type="button"
-                onClick={loadMockData}
-                className="mt-4 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"
+                onClick={fetchProducts}
+                className="mt-4 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
               >
-                Tải lại thực đơn mẫu
+                Tải lại thực đơn
               </button>
             </div>
           )}
 
-          {/* TRƯỜNG HỢP 3: DANH SÁCH SẢN PHẨM (Bố cục 2 cột: grid grid-cols-2 gap-3) */}
-          {!isLoading && products.length > 0 && (
+          {/* TRƯỜNG HỢP 4: DANH SÁCH SẢN PHẨM (Bố cục 2 cột: grid grid-cols-2 gap-3) */}
+          {!isLoading && !error && products.length > 0 && (
             <div>
               {/* Tiêu đề nhóm thực đơn */}
               <div className="flex items-center justify-between mb-3 px-1">
@@ -548,7 +578,7 @@ export default function MenuPage() {
                   <button
                     type="button"
                     onClick={() => setSelectedCategory("Tất cả")}
-                    className="mt-3 text-xs font-semibold text-emerald-800 underline underline-offset-2"
+                    className="mt-3 text-xs font-semibold text-emerald-800 underline underline-offset-2 cursor-pointer"
                   >
                     Xem tất cả món
                   </button>
@@ -562,7 +592,7 @@ export default function MenuPage() {
                       onClick={() => handleOpenDetailModal(product)}
                       className="group bg-white rounded-2xl p-2.5 shadow-sm hover:shadow-md border border-stone-200/70 hover:border-emerald-300 transition-all duration-200 cursor-pointer flex flex-col active:scale-[0.98] select-none"
                     >
-                      {/* Khung ảnh món ăn bo góc rounded-2xl */}
+                      {/* Khung ảnh món ăn hiển thị bằng trường imageUrl */}
                       <div className="relative w-full aspect-square overflow-hidden rounded-2xl bg-stone-100 mb-2.5">
                         <img
                           src={product.imageUrl}
@@ -570,7 +600,7 @@ export default function MenuPage() {
                           loading="lazy"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
-                        {/* Tag số lượng có sẵn thanh thoát */}
+                        {/* Tag số lượng có sẵn */}
                         <span className="absolute top-2 right-2 bg-black/45 backdrop-blur-md text-white text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/10 shadow-xs">
                           Còn {product.stock}
                         </span>
@@ -593,7 +623,7 @@ export default function MenuPage() {
                           <span className="text-xs font-bold text-emerald-900">
                             {formatPriceVND(product.price)}
                           </span>
-                          {/* Nút cộng nhỏ trang trí với hiệu ứng đổ bóng khi hover */}
+                          {/* Nút cộng nhỏ trang trí */}
                           <span className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-800 flex items-center justify-center text-sm font-bold shadow-xs group-hover:bg-emerald-800 group-hover:text-white group-hover:shadow-md group-hover:shadow-emerald-900/30 group-hover:scale-105 transition-all duration-200">
                             +
                           </span>
@@ -615,7 +645,7 @@ export default function MenuPage() {
             <button
               type="button"
               onClick={handleViewCart}
-              className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-semibold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-900/20 active:scale-[0.99] transition-all flex items-center justify-between"
+              className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-semibold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-900/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer"
             >
               {/* Biểu tượng Giỏ hàng và số lượng */}
               <div className="flex items-center gap-2.5">
@@ -661,7 +691,7 @@ export default function MenuPage() {
         </footer>
 
         {/* ------------------------------------------------------------------ */}
-        {/* TASK 4: MODAL / BOTTOM SHEET CHI TIẾT VÀ TÙY CHỌN MÓN              */}
+        {/* MODAL / BOTTOM SHEET CHI TIẾT VÀ TÙY CHỌN MÓN                      */}
         {/* ------------------------------------------------------------------ */}
         {selectedProduct && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
@@ -682,7 +712,7 @@ export default function MenuPage() {
               <button
                 type="button"
                 onClick={handleCloseModal}
-                className="absolute top-3 right-3 z-20 flex items-center gap-1 px-3 py-1.5 rounded-full bg-stone-900/70 hover:bg-stone-900 text-white text-xs font-medium backdrop-blur-md shadow-md active:scale-95 transition-all"
+                className="absolute top-3 right-3 z-20 flex items-center gap-1 px-3 py-1.5 rounded-full bg-stone-900/70 hover:bg-stone-900 text-white text-xs font-medium backdrop-blur-md shadow-md active:scale-95 transition-all cursor-pointer"
                 aria-label="Đóng cửa sổ tùy chọn"
               >
                 <span>✕</span>
@@ -705,7 +735,7 @@ export default function MenuPage() {
                   )}
                 </div>
 
-                {/* 2. TÊN MÓN VÀ GIÁ CƠ SỞ (phông không chân hiện đại) */}
+                {/* 2. TÊN MÓN VÀ GIÁ CƠ SỞ */}
                 <div className="mb-4">
                   <div className="flex items-start justify-between gap-2">
                     <h2 className="text-xl font-bold tracking-tight text-stone-900 font-sans">
@@ -722,7 +752,7 @@ export default function MenuPage() {
                   )}
                 </div>
 
-                {/* 3. TÙY CHỌN KÍCH CỠ (SIZE) - 3 NÚT BẤM DẠNG PILL */}
+                {/* 3. TÙY CHỌN KÍCH CỠ (SIZE): Nhỏ, Vừa, Lớn */}
                 <div className="mb-5 bg-white p-3.5 rounded-2xl border border-stone-200/80 shadow-xs">
                   <div className="flex items-center justify-between mb-2.5">
                     <label className="text-xs font-bold uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
@@ -744,7 +774,7 @@ export default function MenuPage() {
                           key={size.id}
                           type="button"
                           onClick={() => setSelectedSize(size)}
-                          className={`py-2 px-1 rounded-xl text-center border transition-all duration-200 flex flex-col items-center justify-center ${
+                          className={`py-2 px-1 rounded-xl text-center border transition-all duration-200 flex flex-col items-center justify-center cursor-pointer ${
                             isSelected
                               ? "bg-emerald-800 border-emerald-800 text-white shadow-sm ring-2 ring-emerald-700/20"
                               : "bg-stone-50/70 border-stone-200 hover:border-emerald-300 text-stone-700 hover:bg-stone-100/70"
@@ -762,7 +792,9 @@ export default function MenuPage() {
                               isSelected ? "text-emerald-100" : "text-stone-500"
                             }`}
                           >
-                            +{formatPriceVND(size.extraPrice)}
+                            {size.extraPrice > 0
+                              ? `+${formatPriceVND(size.extraPrice)}`
+                              : "Mặc định"}
                           </span>
                         </button>
                       );
@@ -770,7 +802,7 @@ export default function MenuPage() {
                   </div>
                 </div>
 
-                {/* 4. TÙY CHỌN TOPPING (CHECKBOX ĐA CHỌN) */}
+                {/* 4. TÙY CHỌN TOPPING (CHECKBOX ĐA CHỌN): Trân châu trắng, Thạch nha đam... */}
                 <div className="mb-2 bg-white p-3.5 rounded-2xl border border-stone-200/80 shadow-xs">
                   <div className="flex items-center justify-between mb-2.5">
                     <label className="text-xs font-bold uppercase tracking-wider text-emerald-950 flex items-center gap-1.5">
@@ -860,7 +892,7 @@ export default function MenuPage() {
                       disabled={quantity <= 1}
                       onClick={handleDecreaseQuantity}
                       aria-label="Giảm số lượng"
-                      className="w-8 h-8 rounded-xl bg-white border border-stone-200 text-stone-800 flex items-center justify-center font-bold text-base shadow-xs disabled:opacity-35 disabled:cursor-not-allowed hover:bg-stone-50 active:scale-95 transition-all"
+                      className="w-8 h-8 rounded-xl bg-white border border-stone-200 text-stone-800 flex items-center justify-center font-bold text-base shadow-xs disabled:opacity-35 disabled:cursor-not-allowed hover:bg-stone-50 active:scale-95 transition-all cursor-pointer"
                     >
                       −
                     </button>
@@ -872,7 +904,7 @@ export default function MenuPage() {
                       disabled={quantity >= selectedProduct.stock}
                       onClick={handleIncreaseQuantity}
                       aria-label="Tăng số lượng"
-                      className="w-8 h-8 rounded-xl bg-white border border-stone-200 text-stone-800 flex items-center justify-center font-bold text-base shadow-xs disabled:opacity-35 disabled:cursor-not-allowed hover:bg-stone-50 active:scale-95 transition-all"
+                      className="w-8 h-8 rounded-xl bg-white border border-stone-200 text-stone-800 flex items-center justify-center font-bold text-base shadow-xs disabled:opacity-35 disabled:cursor-not-allowed hover:bg-stone-50 active:scale-95 transition-all cursor-pointer"
                     >
                       +
                     </button>
@@ -883,7 +915,7 @@ export default function MenuPage() {
                 <button
                   type="button"
                   onClick={handleAddToCart}
-                  className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all flex items-center justify-between"
+                  className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer"
                 >
                   <span className="text-sm">
                     Thêm vào giỏ • {quantity} {quantity > 1 ? "ly" : "món"}
@@ -937,7 +969,7 @@ export default function MenuPage() {
                 </svg>
               </div>
 
-              {/* Tiêu đề thông báo thành công (font-sans hiện đại) */}
+              {/* Tiêu đề thông báo thành công */}
               <h3 className="text-lg font-bold tracking-tight text-stone-900 font-sans text-center">
                 Thêm vào giỏ thành công!
               </h3>
@@ -995,11 +1027,11 @@ export default function MenuPage() {
                 </div>
               </div>
 
-              {/* Nút bấm 'Tiếp tục chọn món' màu xanh rêu */}
+              {/* Nút bấm 'Tiếp tục chọn món' */}
               <button
                 type="button"
                 onClick={handleCloseSuccessModal}
-                className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all text-sm"
+                className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all text-sm cursor-pointer"
               >
                 Tiếp tục chọn món
               </button>
