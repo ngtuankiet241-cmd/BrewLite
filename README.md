@@ -31,6 +31,11 @@ npm.cmd --prefix backend run start:dev
 The API listens on `http://localhost:3001`. Its starter endpoint is
 `http://localhost:3001/`.
 
+The sample product menu is available at `GET http://localhost:3001/products`.
+It returns products with `id`, `name`, `price` (VND), and `imageUrl` fields.
+The menu currently uses in-memory sample data; persistence can be added with
+the database integration in a later task.
+
 Terminal 2 - frontend:
 
 ```powershell
