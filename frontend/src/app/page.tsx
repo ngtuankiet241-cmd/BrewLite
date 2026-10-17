@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 
 // ============================================================================
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES & INTERFACES)
@@ -141,9 +142,6 @@ export default function MenuPage() {
    *  - Còn lại -> 'Cà phê'
    */
   const fetchProducts = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
     try {
       const response = await fetch("http://localhost:3001/products");
 
@@ -172,6 +170,7 @@ export default function MenuPage() {
         };
       });
 
+      setError(null);
       setProducts(mappedProducts);
     } catch (err: unknown) {
       const errorMessage =
@@ -187,8 +186,18 @@ export default function MenuPage() {
 
   // Gọi fetch API khi component mount lần đầu
   useEffect(() => {
-    fetchProducts();
+    const timeoutId = window.setTimeout(() => {
+      void fetchProducts();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [fetchProducts]);
+
+  const handleReloadProducts = () => {
+    setIsLoading(true);
+    setError(null);
+    void fetchProducts();
+  };
 
   /**
    * Mở Modal Chi tiết & tùy chọn khi click vào món
@@ -372,7 +381,7 @@ export default function MenuPage() {
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={fetchProducts}
+                onClick={handleReloadProducts}
                 className="px-2 py-0.5 rounded-md bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-[10px] font-medium transition-colors cursor-pointer"
                 title="Tải lại dữ liệu từ Backend API"
               >
@@ -511,7 +520,7 @@ export default function MenuPage() {
               </p>
               <button
                 type="button"
-                onClick={fetchProducts}
+                onClick={handleReloadProducts}
                 className="mt-4 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
               >
                 Thử lại ngay
@@ -546,7 +555,7 @@ export default function MenuPage() {
               </p>
               <button
                 type="button"
-                onClick={fetchProducts}
+                onClick={handleReloadProducts}
                 className="mt-4 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
               >
                 Tải lại thực đơn
@@ -594,10 +603,11 @@ export default function MenuPage() {
                     >
                       {/* Khung ảnh món ăn hiển thị bằng trường imageUrl */}
                       <div className="relative w-full aspect-square overflow-hidden rounded-2xl bg-stone-100 mb-2.5">
-                        <img
+                        <Image
                           src={product.imageUrl}
                           alt={product.name}
-                          loading="lazy"
+                          fill
+                          unoptimized
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
                         {/* Tag số lượng có sẵn */}
@@ -723,9 +733,11 @@ export default function MenuPage() {
               <div className="flex-1 overflow-y-auto px-4 pb-6 pt-1">
                 {/* 1. ẢNH LỚN SẢN PHẨM */}
                 <div className="relative w-full h-56 rounded-2xl overflow-hidden shadow-sm bg-stone-100 mb-3.5">
-                  <img
+                  <Image
                     src={selectedProduct.imageUrl}
                     alt={selectedProduct.name}
+                    fill
+                    unoptimized
                     className="w-full h-full object-cover"
                   />
                   {selectedProduct.category && (
