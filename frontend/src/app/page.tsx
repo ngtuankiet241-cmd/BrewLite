@@ -62,7 +62,7 @@ export interface AddedCartItemSummary {
 /**
  * Danh sách các danh mục thức uống để lọc
  */
-export const CATEGORIES = ["Tất cả", "Cà phê", "Trà trái cây"] as const;
+export const CATEGORIES = ["Tất cả", "Cà phê", "Trà trái cây", "Khác"] as const;
 
 /**
  * Danh sách tùy chọn kích cỡ (Size): Nhỏ, Vừa, Lớn
@@ -109,7 +109,7 @@ export default function MenuPage() {
   // Trạng thái lỗi khi gọi API (Error)
   const [error, setError] = useState<string | null>(null);
 
-  // Danh mục đang được chọn để lọc (Tất cả, Cà phê, Trà trái cây)
+  // Danh mục đang được chọn để lọc (Tất cả, Cà phê, Trà trái cây, Khác)
   const [selectedCategory, setSelectedCategory] = useState<string>("Tất cả");
 
   // Quản lý giỏ hàng: số lượng món và tổng số tiền tích lũy
@@ -137,8 +137,9 @@ export default function MenuPage() {
   /**
    * Gọi API NestJS tại http://localhost:3001/products
    * Phân loại category theo tên:
-   *  - Chứa "trà" hoặc "tea" -> 'Trà trái cây'
-   *  - Còn lại -> 'Cà phê'
+   *  - Chứa "cà phê", "americano", "cappuccino" -> 'Cà phê'
+   *  - Chứa "trà", "tea" -> 'Trà trái cây'
+   *  - Các món còn lại -> 'Khác'
    */
   const fetchProducts = useCallback(async () => {
     setIsLoading(true);
@@ -158,17 +159,35 @@ export default function MenuPage() {
       // Bổ sung category theo tên và thiết lập giá trị mặc định cho stock/description
       const mappedProducts: Product[] = data.map((item) => {
         const lowerName = item.name.toLowerCase();
-        const isTea = lowerName.includes("trà") || lowerName.includes("tea");
+
+        let category: string;
+        let defaultDescription: string;
+
+        if (
+          lowerName.includes("cà phê") ||
+          lowerName.includes("americano") ||
+          lowerName.includes("cappuccino")
+        ) {
+          category = "Cà phê";
+          defaultDescription =
+            "Hương vị cà phê Robusta & Arabica đậm đà, thơm nồng truyền thống";
+        } else if (lowerName.includes("trà") || lowerName.includes("tea")) {
+          category = "Trà trái cây";
+          defaultDescription =
+            "Trà tươi thượng hạng thanh mát, sảng khoái từng ngụm";
+        } else {
+          category = "Khác";
+          defaultDescription =
+            "Thức uống đặc biệt thơm ngon, tươi mát sảng khoái";
+        }
 
         return {
           ...item,
-          category: isTea ? "Trà trái cây" : "Cà phê",
+          category,
           stock: (item as unknown as { stock?: number }).stock ?? 20,
           description:
             (item as unknown as { description?: string }).description ??
-            (isTea
-              ? "Trà tươi thượng hạng thanh mát, sảng khoái từng ngụm"
-              : "Hương vị cà phê Robusta & Arabica đậm đà, thơm nồng truyền thống"),
+            defaultDescription,
         };
       });
 
