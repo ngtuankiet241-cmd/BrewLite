@@ -23,6 +23,32 @@ describe('AppController (e2e)', () => {
       .expect('Hello World!');
   });
 
+  it('/products (GET) returns the sample menu', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/products')
+      .expect(200);
+
+    expect(response.body).toHaveLength(4);
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'coffee-milk',
+          name: 'Cà phê sữa',
+          price: 35000,
+          imageUrl: expect.any(String),
+        }),
+      ]),
+    );
+    for (const product of response.body) {
+      expect(product).toEqual({
+        id: expect.any(String),
+        name: expect.any(String),
+        price: expect.any(Number),
+        imageUrl: expect.any(String),
+      });
+    }
+  });
+
   afterEach(async () => {
     await app.close();
   });
