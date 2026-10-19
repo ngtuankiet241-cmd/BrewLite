@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import { CartProvider } from "../context/CartContext";
 import "./globals.css";
 
 // Cấu hình Google Font Plus Jakarta Sans hỗ trợ tiếng Việt đầy đủ, chuẩn mắt hiện đại
@@ -25,7 +26,9 @@ export default function RootLayout({
       lang="vi"
       className={`${plusJakartaSans.variable} font-sans h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans">{children}</body>
+      <body className="min-h-full flex flex-col font-sans">
+        <CartProvider>{children}</CartProvider>
+      </body>
     </html>
   );
 }
