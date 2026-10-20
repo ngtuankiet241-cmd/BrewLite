@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
+import { PRODUCTS } from './../src/products/products.data.js';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -28,17 +29,7 @@ describe('AppController (e2e)', () => {
       .get('/products')
       .expect(200);
 
-    expect(response.body).toHaveLength(4);
-    expect(response.body).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'coffee-milk',
-          name: 'Cà phê sữa',
-          price: 35000,
-          imageUrl: expect.any(String),
-        }),
-      ]),
-    );
+    expect(response.body).toEqual(PRODUCTS);
     for (const product of response.body) {
       expect(product).toEqual({
         id: expect.any(String),
@@ -47,6 +38,109 @@ describe('AppController (e2e)', () => {
         imageUrl: expect.any(String),
       });
     }
+  });
+
+  it('/orders (POST) creates a pending order and calculates prices', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/orders')
+      .send({
+        items: [
+          {
+            productId: 'coffee-milk',
+            quantity: 2,
+            sizeId: 'M',
+            toppingIds: ['cheese'],
+          },
+        ],
+      })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      orderCode: expect.stringMatching(/^ORD-/),
+      status: 'PENDING',
+      totalAmount: 100000,
+      items: [
+        {
+          productId: 'coffee-milk',
+          productName: 'Cà phê sữa',
+          basePrice: 35000,
+          quantity: 2,
+          size: { id: 'M', name: 'Vừa', extraPrice: 5000 },
+          toppings: [{ id: 'cheese', name: 'Kem Cheese', extraPrice: 10000 }],
+          unitPrice: 50000,
+          lineTotal: 100000,
+        },
+      ],
+    });
+    expect(Number.isNaN(Date.parse(response.body.createdAt))).toBe(false);
+  });
+
+  it('/orders (POST) rejects an empty cart', () => {
+    return request(app.getHttpServer())
+      .post('/orders')
+      .send({ items: [] })
+      .expect(400);
+  });
+
+  it('/orders (POST) rejects invalid product and option ids', async () => {
+    await request(app.getHttpServer())
+      .post('/orders')
+      .send({
+        items: [
+          {
+            productId: 'unknown-product',
+            quantity: 1,
+            sizeId: 'S',
+            toppingIds: [],
+          },
+        ],
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/orders')
+      .send({
+        items: [
+          {
+            productId: 'coffee-milk',
+            quantity: 1,
+            sizeId: 'XXL',
+            toppingIds: ['unknown-topping'],
+          },
+        ],
+      })
+      .expect(400);
+  });
+
+  it('/orders (POST) rejects invalid quantities and client-supplied prices', async () => {
+    await request(app.getHttpServer())
+      .post('/orders')
+      .send({
+        items: [
+          {
+            productId: 'coffee-milk',
+            quantity: 0,
+            sizeId: 'S',
+            toppingIds: [],
+          },
+        ],
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/orders')
+      .send({
+        items: [
+          {
+            productId: 'coffee-milk',
+            quantity: 1,
+            sizeId: 'S',
+            toppingIds: [],
+            price: 1,
+          },
+        ],
+      })
+      .expect(400);
   });
 
   afterEach(async () => {
