@@ -55,9 +55,11 @@ frontend.
 category, stock, or description. See [the API contract and open decisions](docs/api-contracts.md).
 
 The backend enables CORS for local frontend requests. The sample product list
-is not persisted in a database. Database selection and order/payment API
-contracts remain future team decisions; payments in this project are simulated
-and must not use real payment credentials.
+is not persisted in a database. `POST /orders` creates a validated `PENDING`
+order in backend memory; orders are lost when the backend restarts. The frontend
+cart submits to this endpoint and keeps the cart if order creation fails.
+Database persistence, authentication, and payment remain later tasks. Payments
+in this project are simulated and must not use real payment credentials.
 
 ## Checks
 
@@ -66,15 +68,14 @@ Run from the repository root:
 ```powershell
 npm.cmd --prefix backend run build
 npm.cmd --prefix backend run lint
-npm.cmd --prefix backend run test:e2e -- --maxWorkers=1
+npm.cmd --prefix backend run test:e2e
 npm.cmd --prefix frontend run lint
 npm.cmd --prefix frontend run build
 ```
 
-The backend e2e test currently expects 4 products while the sample API returns
-10. The `/products` test therefore fails until its expected data is updated.
-The frontend lint/build and backend build/lint have been verified separately;
-re-run all checks after changing the code.
+The backend e2e suite covers the product list and order creation. See
+[the API contract](docs/api-contracts.md) for the order payload and validation
+rules.
 
 ## Environment variables
 

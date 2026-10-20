@@ -48,7 +48,7 @@ export const PRODUCTS: Product[] = [
     name: 'Soda việt quất',
     price: 42000,
     imageUrl:
-      'https://cdn.tgdd.vn/2021/09/CookRecipe/GalleryStep/thanh-pham-68.jpg',
+      'https://bizweb.dktcdn.net/100/314/104/articles/soda-viet-quat.jpg?v=1691224529203',
   },
   {
     id: 'Matcha-latte',
