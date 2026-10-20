@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import CartDrawer from "../components/CartDrawer";
+import { useCart } from "../context/CartContext";
 
 // ============================================================================
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES & INTERFACES)
@@ -112,9 +114,8 @@ export default function MenuPage() {
   // Danh mục đang được chọn để lọc (Tất cả, Cà phê, Trà trái cây, Khác)
   const [selectedCategory, setSelectedCategory] = useState<string>("Tất cả");
 
-  // Quản lý giỏ hàng: số lượng món và tổng số tiền tích lũy
-  const [cartCount, setCartCount] = useState<number>(0);
-  const [cartTotal, setCartTotal] = useState<number>(0);
+  const { addToCart, totalItemsCount, totalAmount, isHydrated } = useCart();
+  const [isCartOpen, setIsCartOpen] = useState(false);
 
   // --------------------------------------------------------------------------
   // STATE CHO MODAL CHI TIẾT & TÙY CHỌN MÓN
@@ -127,6 +128,7 @@ export default function MenuPage() {
   const [selectedToppings, setSelectedToppings] = useState<string[]>([]);
   // Số lượng món được chọn (mặc định là 1)
   const [quantity, setQuantity] = useState<number>(1);
+  const [quantityInput, setQuantityInput] = useState("1");
 
   // --------------------------------------------------------------------------
   // STATE CHO MODAL THÔNG BÁO THÀNH CÔNG (SUCCESS DIALOG POPUP)
@@ -142,9 +144,6 @@ export default function MenuPage() {
    *  - Các món còn lại -> 'Khác'
    */
   const fetchProducts = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
     try {
       const response = await fetch("http://localhost:3001/products");
 
@@ -206,6 +205,8 @@ export default function MenuPage() {
 
   // Gọi fetch API khi component mount lần đầu
   useEffect(() => {
+    // The request updates page state after its asynchronous response resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProducts();
   }, [fetchProducts]);
 
@@ -218,6 +219,7 @@ export default function MenuPage() {
     setSelectedSize(SIZE_OPTIONS[0]);
     setSelectedToppings([]);
     setQuantity(1);
+    setQuantityInput("1");
   };
 
   /**
@@ -231,7 +233,9 @@ export default function MenuPage() {
    * Xử lý giảm số lượng (tối thiểu là 1)
    */
   const handleDecreaseQuantity = () => {
-    setQuantity((prev) => Math.max(1, prev - 1));
+    const nextQuantity = Math.max(1, quantity - 1);
+    setQuantity(nextQuantity);
+    setQuantityInput(String(nextQuantity));
   };
 
   /**
@@ -240,7 +244,29 @@ export default function MenuPage() {
   const handleIncreaseQuantity = () => {
     if (!selectedProduct) return;
     const maxStock = selectedProduct.stock || 99;
-    setQuantity((prev) => Math.min(maxStock, prev + 1));
+    const nextQuantity = Math.min(maxStock, quantity + 1);
+    setQuantity(nextQuantity);
+    setQuantityInput(String(nextQuantity));
+  };
+
+  const handleQuantityInputChange = (value: string) => {
+    setQuantityInput(value);
+    if (!/^\d+$/.test(value) || !selectedProduct) return;
+
+    const parsedQuantity = Number(value);
+    if (Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0) {
+      setQuantity(Math.min(selectedProduct.stock || 99, parsedQuantity));
+    }
+  };
+
+  const handleQuantityInputBlur = () => {
+    const parsedQuantity = Number(quantityInput);
+    const normalizedQuantity =
+      Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0
+        ? Math.min(selectedProduct?.stock || 99, parsedQuantity)
+        : quantity;
+    setQuantity(normalizedQuantity);
+    setQuantityInput(String(normalizedQuantity));
   };
 
   /**
@@ -274,8 +300,8 @@ export default function MenuPage() {
    * TÍNH TOÁN TỔNG TIỀN ĐỘNG (Dynamic Total Price Calculation):
    * Công thức: (Giá gốc + Giá size + Topping) * Số lượng
    */
-  const calculateTotalPrice = (): number => {
-    return calculateUnitPrice() * quantity;
+  const calculateTotalPrice = (itemQuantity = quantity): number => {
+    return calculateUnitPrice() * itemQuantity;
   };
 
   /**
@@ -285,7 +311,14 @@ export default function MenuPage() {
   const handleAddToCart = () => {
     if (!selectedProduct) return;
 
-    const totalPrice = calculateTotalPrice();
+    const parsedQuantity = Number(quantityInput);
+    const quantityToAdd =
+      Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0
+        ? Math.min(selectedProduct.stock || 99, parsedQuantity)
+        : quantity;
+    setQuantity(quantityToAdd);
+    setQuantityInput(String(quantityToAdd));
+    const totalPrice = calculateTotalPrice(quantityToAdd);
     const toppingNames = selectedToppings
       .map((id) => TOPPING_OPTIONS.find((t) => t.id === id)?.name)
       .filter((name): name is string => Boolean(name));
@@ -296,13 +329,26 @@ export default function MenuPage() {
       sizeName: selectedSize.name,
       sizeExtraPrice: selectedSize.extraPrice,
       toppings: toppingNames,
-      quantity: quantity,
+      quantity: quantityToAdd,
       totalPrice: totalPrice,
     });
 
-    // 2. Cập nhật số lượng và tổng tiền giỏ hàng ở Bottom bar
-    setCartCount((prev) => prev + quantity);
-    setCartTotal((prev) => prev + totalPrice);
+    addToCart({
+      id: selectedProduct.id,
+      name: selectedProduct.name,
+      price: calculateUnitPrice(),
+      quantity: quantityToAdd,
+      size: {
+        id: selectedSize.id,
+        name: selectedSize.name,
+        extraPrice: selectedSize.extraPrice,
+      },
+      toppings: selectedToppings
+        .map((id) => TOPPING_OPTIONS.find((topping) => topping.id === id))
+        .filter((topping): topping is ToppingOption => Boolean(topping))
+        .map(({ id, name, extraPrice }) => ({ id, name, extraPrice })),
+      imageUrl: selectedProduct.imageUrl,
+    });
 
     // 3. Đóng Modal chi tiết món
     handleCloseModal();
@@ -313,21 +359,6 @@ export default function MenuPage() {
    */
   const handleCloseSuccessModal = () => {
     setAddedItemSummary(null);
-  };
-
-  /**
-   * Xử lý khi nhấn nút Xem giỏ hàng ở Bottom bar
-   */
-  const handleViewCart = () => {
-    if (cartCount === 0) {
-      alert("Giỏ hàng của bạn hiện đang trống (0 món).");
-    } else {
-      alert(
-        `Giỏ hàng của bạn:\n• Số lượng: ${cartCount} món\n• Tổng số tiền: ${formatPriceVND(
-          cartTotal
-        )}`
-      );
-    }
   };
 
   /**
@@ -663,7 +694,7 @@ export default function MenuPage() {
           <div className="p-3 bg-gradient-to-t from-[#FCFBF8] via-[#FCFBF8]/95 to-transparent pointer-events-auto">
             <button
               type="button"
-              onClick={handleViewCart}
+              onClick={() => setIsCartOpen(true)}
               className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-semibold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-900/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer"
             >
               {/* Biểu tượng Giỏ hàng và số lượng */}
@@ -683,17 +714,19 @@ export default function MenuPage() {
                   </svg>
                   {/* Badge số lượng sản phẩm trên giỏ */}
                   <span className="absolute -top-1.5 -right-2 bg-amber-500 text-stone-950 text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                    {cartCount}
+                    {isHydrated ? totalItemsCount : 0}
                   </span>
                 </div>
                 <span className="text-sm font-semibold tracking-wide">
-                  Xem giỏ hàng ({cartCount})
+                  Xem giỏ hàng ({isHydrated ? totalItemsCount : 0})
                 </span>
               </div>
 
               {/* Tổng số tiền món đã thêm */}
               <div className="flex items-center gap-1.5 text-xs text-emerald-100 font-bold">
-                <span>{cartTotal > 0 ? formatPriceVND(cartTotal) : "0 ₫"}</span>
+                <span>
+                  {totalAmount > 0 ? formatPriceVND(totalAmount) : "0 ₫"}
+                </span>
                 <svg
                   className="w-4 h-4 stroke-current"
                   fill="none"
@@ -708,6 +741,11 @@ export default function MenuPage() {
             </button>
           </div>
         </footer>
+
+        <CartDrawer
+          isOpen={isCartOpen}
+          onClose={() => setIsCartOpen(false)}
+        />
 
         {/* ------------------------------------------------------------------ */}
         {/* MODAL / BOTTOM SHEET CHI TIẾT VÀ TÙY CHỌN MÓN                      */}
@@ -915,9 +953,17 @@ export default function MenuPage() {
                     >
                       −
                     </button>
-                    <span className="w-6 text-center text-sm font-bold text-stone-900 select-none">
-                      {quantity}
-                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      aria-label="Nhập số lượng món"
+                      value={quantityInput}
+                      onChange={(event) =>
+                        handleQuantityInputChange(event.target.value)
+                      }
+                      onBlur={handleQuantityInputBlur}
+                      className="h-8 w-14 rounded-lg border border-stone-200 bg-white text-center text-sm font-bold text-stone-900 outline-none focus:border-emerald-700"
+                    />
                     <button
                       type="button"
                       disabled={quantity >= selectedProduct.stock}
