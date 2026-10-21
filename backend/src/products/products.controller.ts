@@ -7,7 +7,7 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Get()
-  findAll(): Product[] {
+  findAll(): Promise<Product[]> {
     return this.productsService.findAll();
   }
 }

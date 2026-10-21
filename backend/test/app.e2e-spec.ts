@@ -29,7 +29,20 @@ describe('AppController (e2e)', () => {
       .get('/products')
       .expect(200);
 
-    expect(response.body).toEqual(PRODUCTS);
+    expect(response.body.length).toBeGreaterThanOrEqual(PRODUCTS.length);
+    expect(response.body).toEqual(
+      expect.arrayContaining(PRODUCTS.map((product) => expect.objectContaining(product))),
+    );
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'coffee-milk',
+          name: 'Cà phê sữa',
+          price: 35000,
+          imageUrl: expect.any(String),
+        }),
+      ]),
+    );
     for (const product of response.body) {
       expect(product).toEqual({
         id: expect.any(String),
