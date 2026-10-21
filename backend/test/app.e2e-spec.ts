@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
+import { PRODUCTS } from './../src/products/products.data.js';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -28,7 +29,10 @@ describe('AppController (e2e)', () => {
       .get('/products')
       .expect(200);
 
-    expect(response.body).toHaveLength(4);
+    expect(response.body.length).toBeGreaterThanOrEqual(PRODUCTS.length);
+    expect(response.body).toEqual(
+      expect.arrayContaining(PRODUCTS.map((product) => expect.objectContaining(product))),
+    );
     expect(response.body).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

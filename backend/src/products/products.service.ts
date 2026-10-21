@@ -1,10 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { PRODUCTS } from './products.data.js';
-import { Product } from './product.type.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import type { Product } from './product.type.js';
 
 @Injectable()
 export class ProductsService {
-  findAll(): Product[] {
-    return PRODUCTS;
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findAll(): Promise<Product[]> {
+    const products = await this.prisma.product.findMany({ orderBy: { id: 'asc' } });
+    return products.map((product) => ({
+      id: product.id,
+      name: product.name,
+      price: product.price.toNumber(),
+      imageUrl: product.imageUrl ?? '',
+    }));
   }
 }
