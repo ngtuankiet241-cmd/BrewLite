@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import CartDrawer from "../components/CartDrawer";
 import { useCart } from "../context/CartContext";
+import AuthModal from "../components/AuthModal";
 
 // ============================================================================
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES & INTERFACES)
@@ -103,7 +104,35 @@ const formatPriceVND = (price: number): string => {
 // 4. MAIN COMPONENT: MENU PAGE
 // ============================================================================
 
+
+        //login
+  type AuthUser = {
+  id: string;
+  email: string;
+  phone: string;
+  loyaltyPoints: number;
+};
+
+
+ 
 export default function MenuPage() {
+  // kiểm tra đăng nhập 
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  // Xử lý khi đăng nhập thành công
+const handleLoginSuccess = (user: AuthUser, token: string) => {
+  setAuthUser(user);
+  localStorage.setItem("brewlite_access_token", token);
+  localStorage.setItem("brewlite_user", JSON.stringify(user));
+};
+
+// Xử lý đăng xuất
+const handleLogout = () => {
+  localStorage.removeItem("brewlite_access_token");
+  localStorage.removeItem("brewlite_user");
+  setAuthUser(null);
+};
+
   // Quản lý danh sách sản phẩm lấy từ Backend API
   const [products, setProducts] = useState<Product[]>([]);
   // Trạng thái đang tải dữ liệu (Loading)
@@ -202,6 +231,22 @@ export default function MenuPage() {
       setIsLoading(false);
     }
   }, []);
+
+// giữ trạng thái đăng nhập khi mở lại trang
+  useEffect(() => {
+  try {
+    const savedUser = localStorage.getItem("brewlite_user");
+    const savedToken = localStorage.getItem("brewlite_access_token");
+
+    if (savedUser && savedToken) {
+      setAuthUser(JSON.parse(savedUser) as AuthUser);
+    }
+  } catch (error) {
+    console.error("Không thể khôi phục thông tin đăng nhập:", error);
+    localStorage.removeItem("brewlite_user");
+    localStorage.removeItem("brewlite_access_token");
+  }
+}, []);
 
   // Gọi fetch API khi component mount lần đầu
   useEffect(() => {
@@ -376,69 +421,101 @@ export default function MenuPage() {
         {/* ------------------------------------------------------------------ */}
         {/* HEADER: Tên quán, Subtitle và Icon Menu                             */}
         {/* ------------------------------------------------------------------ */}
-        <header className="sticky top-0 z-20 bg-[#FCFBF8]/90 backdrop-blur-md border-b border-stone-200/70 px-4 py-3.5 transition-all">
-          <div className="flex items-center justify-between">
-            {/* Nhánh bên trái: Tên thương hiệu & Subtitle */}
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block animate-pulse" />
-                <h1 className="text-xl font-bold tracking-tight text-emerald-950 font-sans">
-                  BrewLite
-                </h1>
-              </div>
-              <p className="text-[11px] font-medium tracking-wide uppercase text-amber-900/75 mt-0.5">
-                Cashless Drink Ordering
-              </p>
-            </div>
+        
+<header className="sticky top-0 z-20 bg-[#FCFBF8]/90 backdrop-blur-md border-b border-stone-200/70 px-4 py-3.5 transition-all">
+  <div className="flex items-center justify-between gap-2">
+    {/* Thương hiệu BrewLite */}
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5">
+        <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block animate-pulse" />
+        <h1 className="text-xl font-bold tracking-tight text-emerald-950 font-sans">
+          BrewLite
+        </h1>
+      </div>
+      <p className="text-[11px] font-medium tracking-wide uppercase text-amber-900/75 mt-0.5">
+        Cashless Drink Ordering
+      </p>
+    </div>
 
-            {/* Nhánh bên phải: Nút Menu Icon nhỏ gọn */}
-            <button
-              type="button"
-              aria-label="Mở danh mục menu"
-              onClick={() => alert("Menu tùy chọn đang được phát triển")}
-              className="p-2 rounded-xl text-stone-600 hover:text-emerald-900 hover:bg-stone-200/60 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
-            >
-              <svg
-                className="w-5 h-5 stroke-current"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="4" y1="7" x2="20" y2="7" />
-                <line x1="4" y1="12" x2="20" y2="12" />
-                <line x1="4" y1="17" x2="14" y2="17" />
-              </svg>
-            </button>
-          </div>
+    {/* Đăng nhập / Thông tin tài khoản / Đăng xuất */}
+    <div className="flex items-center gap-2 shrink-0">
+      {authUser ? (
+        <>
+          <span
+            className="text-[11px] font-semibold text-emerald-950 max-w-[95px] truncate"
+            title={authUser.phone}
+          >
+            {authUser.phone}
+          </span>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="px-2.5 py-2 rounded-xl bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-xs font-semibold transition-colors"
+          >
+            Đăng xuất
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setIsAuthOpen(true)}
+          className="px-3 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold transition-colors"
+        >
+          Đăng nhập
+        </button>
+      )}
 
-          {/* Thanh công cụ hỗ trợ kiểm thử nghiệm thu (DoD Tester Toolbar) */}
-          <div className="mt-3 pt-2 border-t border-stone-200/50 flex items-center justify-between text-xs">
-            <span className="text-[11px] font-medium text-stone-600 flex items-center gap-1">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-700" />
-              Thực đơn hôm nay
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={fetchProducts}
-                className="px-2 py-0.5 rounded-md bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-[10px] font-medium transition-colors cursor-pointer"
-                title="Tải lại dữ liệu từ Backend API"
-              >
-                Tải lại API
-              </button>
-              <button
-                type="button"
-                onClick={() => setProducts([])}
-                className="px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-medium transition-colors cursor-pointer"
-                title="Giả lập danh sách rỗng để nghiệm thu Empty state"
-              >
-                Test Empty
-              </button>
-            </div>
-          </div>
-        </header>
+      {/* Giữ nguyên nút menu */}
+      <button
+        type="button"
+        aria-label="Mở danh mục menu"
+        onClick={() => alert("Menu tùy chọn đang được phát triển")}
+        className="p-2 rounded-xl text-stone-600 hover:text-emerald-900 hover:bg-stone-200/60 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+      >
+        <svg
+          className="w-5 h-5 stroke-current"
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="4" y1="7" x2="20" y2="7" />
+          <line x1="4" y1="12" x2="20" y2="12" />
+          <line x1="4" y1="17" x2="14" y2="17" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  {/* Thanh công cụ kiểm thử: giữ nguyên */}
+  <div className="mt-3 pt-2 border-t border-stone-200/50 flex items-center justify-between text-xs">
+    <span className="text-[11px] font-medium text-stone-600 flex items-center gap-1">
+      <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-700" />
+      Thực đơn hôm nay
+    </span>
+
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={fetchProducts}
+        className="px-2 py-0.5 rounded-md bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-[10px] font-medium transition-colors cursor-pointer"
+        title="Tải lại dữ liệu từ Backend API"
+      >
+        Tải lại API
+      </button>
+      <button
+        type="button"
+        onClick={() => setProducts([])}
+        className="px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-medium transition-colors cursor-pointer"
+        title="Giả lập danh sách rỗng để nghiệm thu Empty state"
+      >
+        Test Empty
+      </button>
+    </div>
+  </div>
+</header>
+
 
         {/* ------------------------------------------------------------------ */}
         {/* BANNER CHÀO MỪNG SANG TRỌNG TONE XANH RÊU                          */}
@@ -1103,6 +1180,12 @@ export default function MenuPage() {
             </div>
           </div>
         )}
+        {isAuthOpen && (
+  <AuthModal
+    onClose={() => setIsAuthOpen(false)}
+    onLoginSuccess={handleLoginSuccess}
+  />
+)}
       </main>
     </div>
   );

@@ -19,6 +19,7 @@ model Product {
 model User {
   id            String  @id @default(cuid())
   email         String  @unique
+  phone         String?  @unique
   passwordHash  String
   loyaltyPoints Int     @default(0)
   orders        Order[]
