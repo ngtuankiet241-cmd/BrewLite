@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { PRODUCTS } from '../products/products.data.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
 import {
   Order,
@@ -23,11 +23,23 @@ const TOPPINGS = {
 
 @Injectable()
 export class OrdersService {
+  constructor(private readonly prisma: PrismaService) {}
+
   private readonly orders = new Map<string, Order>();
 
-  create(dto: CreateOrderDto): Order {
+  async create(dto: CreateOrderDto): Promise<Order> {
+    const products = await this.prisma.product.findMany({
+      where: {
+        id: { in: [...new Set(dto.items.map((item) => item.productId))] },
+      },
+      select: { id: true, name: true, price: true },
+    });
+    const productsById = new Map(
+      products.map((product) => [product.id, product]),
+    );
+
     const items = dto.items.map((item): OrderItem => {
-      const product = PRODUCTS.find(({ id }) => id === item.productId);
+      const product = productsById.get(item.productId);
       if (!product) {
         throw new BadRequestException(
           `Sản phẩm không tồn tại: ${item.productId}`,
@@ -42,8 +54,9 @@ export class OrdersService {
         id,
         ...TOPPINGS[id],
       }));
+      const basePrice = product.price.toNumber();
       const unitPrice =
-        product.price +
+        basePrice +
         size.extraPrice +
         toppings.reduce((total, topping) => total + topping.extraPrice, 0);
       const lineTotal = unitPrice * item.quantity;
@@ -57,7 +70,7 @@ export class OrdersService {
       return {
         productId: product.id,
         productName: product.name,
-        basePrice: product.price,
+        basePrice,
         quantity: item.quantity,
         size,
         toppings,
