@@ -17,7 +17,7 @@ export class OrdersController {
       }),
     )
     dto: CreateOrderDto,
-  ): Order {
+  ): Promise<Order> {
     return this.ordersService.create(dto);
   }
 }
