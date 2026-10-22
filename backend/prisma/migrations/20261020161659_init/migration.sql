@@ -1,6 +1,9 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateTable
 CREATE TABLE "Product" (
-    "id" SERIAL NOT NULL,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "price" DECIMAL(12,2) NOT NULL,
     "imageUrl" TEXT,
@@ -11,7 +14,7 @@ CREATE TABLE "Product" (
 
 -- CreateTable
 CREATE TABLE "User" (
-    "id" SERIAL NOT NULL,
+    "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "loyaltyPoints" INTEGER NOT NULL DEFAULT 0,
@@ -21,8 +24,8 @@ CREATE TABLE "User" (
 
 -- CreateTable
 CREATE TABLE "Order" (
-    "id" SERIAL NOT NULL,
-    "userId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "total" DECIMAL(12,2) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -32,9 +35,9 @@ CREATE TABLE "Order" (
 
 -- CreateTable
 CREATE TABLE "OrderItem" (
-    "id" SERIAL NOT NULL,
-    "orderId" INTEGER NOT NULL,
-    "productId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "orderId" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
     "size" TEXT NOT NULL,
     "qty" INTEGER NOT NULL,
     "lineTotal" DECIMAL(12,2) NOT NULL,
@@ -44,8 +47,8 @@ CREATE TABLE "OrderItem" (
 
 -- CreateTable
 CREATE TABLE "Payment" (
-    "id" SERIAL NOT NULL,
-    "orderId" INTEGER NOT NULL,
+    "id" TEXT NOT NULL,
+    "orderId" TEXT NOT NULL,
     "idempotencyKey" TEXT NOT NULL,
     "amount" DECIMAL(12,2) NOT NULL,
     "method" TEXT NOT NULL,
