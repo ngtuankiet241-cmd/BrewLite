@@ -37,7 +37,7 @@ the frontend supplies defaults for those fields. The seed menu contains 10 produ
 | Method and path | `POST /orders` |
 | Success response | HTTP `201`; created order |
 | Authentication | Not required in this task; JWT integration remains separate |
-| Persistence | In-memory for this task; orders are lost when the backend restarts |
+| Persistence | PostgreSQL through Prisma; the order, its items, inventory deduction and promotion usage are committed in one transaction |
 | Status | New orders start as `PENDING` |
 | Price handling | Backend looks up product prices and validates size/topping IDs; client prices are not accepted |
 
@@ -64,12 +64,36 @@ The response includes `orderCode`, `status`, a server-priced item snapshot,
 `totalAmount`, and `createdAt`. The example request above creates two configured
 cà phê sữa items at 50,000 VND each, for a total of 100,000 VND.
 
+`orderCode` is stored as the `Order.id` primary key (and is the value a future
+payment will use as `Payment.orderId`). A new order has no payment record yet.
+The existing guest checkout remains supported: `userId` is nullable and is not
+accepted from the request body; associating authenticated users is a later task.
+
+An optional `promotionCode` applies a validated promotion. Discounted responses
+also include `subtotalAmount`, `discountAmount`, and the normalized `promotionCode`.
+The database stores subtotal, discount, and payable total even without a code.
+Each new `OrderItem.snapshot` preserves the product name, base price, quantity,
+size, toppings, unit price and line total at checkout, so later catalog changes
+do not alter the order's historical details. Legacy rows retain their original
+data and may have null subtotal/snapshot fields.
+
+Stock is deducted when a `PENDING` order is created. Quantities for the same product
+are added together across all sizes and toppings. If a product has insufficient
+stock (including zero stock), `POST /orders` returns HTTP `400` with a message
+identifying the product. The cart is retained on failure; after success, the
+frontend reloads the menu to display the updated inventory.
+
+Creating the order and its items, deducting stock and consuming a promotion share
+one transaction. A failure rolls back all writes, including inventory deductions
+and the promotion usage counter. Whole-VND line totals and subtotals must fit the
+existing `DECIMAL(12,2)` database columns
+(at most 9,999,999,999 VND); quantity must fit a PostgreSQL `INTEGER`.
+
 ## Decisions still needed
 
 | Topic | Current status | Follow-up |
 |---|---|---|
 | Product category and description | Not returned by `GET /products`; frontend infers these values from the name, which can misclassify drinks such as soda or matcha. | Team agrees whether these fields belong in the API response, then updates the frontend/API consistently. |
-| Persistent order storage | Orders are currently in memory and disappear on backend restart. | Add the agreed database and migrations in a later task. |
 | Authentication on order creation | Not required for task 6. | Confirm user association and JWT guard when integrating the authentication task. |
 | Payment and order-state transitions | A new order is created only as `PENDING`. | Payment outcomes and later transitions are implemented in their respective tasks. |
 

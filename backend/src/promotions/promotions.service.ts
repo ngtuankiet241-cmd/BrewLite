@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import type { Promotion } from '@prisma/client';
+import type { Prisma, Promotion } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 export interface PromotionQuote {
@@ -13,8 +13,11 @@ export interface PromotionQuote {
 export class PromotionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async findByCode(code: string): Promise<Promotion> {
-    const promotion = await this.prisma.promotion.findUnique({
+  private async findByCode(
+    code: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<Promotion> {
+    const promotion = await db.promotion.findUnique({
       where: { code: code.trim().toUpperCase() },
     });
     if (!promotion) {
@@ -82,14 +85,18 @@ export class PromotionsService {
     return this.quote(promotion, orderAmount);
   }
 
-  async consume(code: string, orderAmount: number): Promise<PromotionQuote> {
-    const promotion = await this.findByCode(code);
+  async consume(
+    code: string,
+    orderAmount: number,
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<PromotionQuote> {
+    const promotion = await this.findByCode(code, db);
     const quote = this.quote(promotion, orderAmount);
 
     const now = new Date();
     // One conditional UPDATE prevents concurrent orders from exceeding the limit.
     // Match the quoted settings as well, so a changed code cannot use stale prices.
-    const result = await this.prisma.promotion.updateMany({
+    const result = await db.promotion.updateMany({
       where: {
         id: promotion.id,
         code: promotion.code,

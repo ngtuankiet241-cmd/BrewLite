@@ -22,14 +22,15 @@ const TOPPINGS = {
   [OrderToppingId.Cheese]: { name: 'Kem Cheese', extraPrice: 10000 },
 } satisfies Record<OrderToppingId, { name: string; extraPrice: number }>;
 
+// Largest whole-VND amount supported by the existing DECIMAL(12,2) columns.
+const MAX_ORDER_AMOUNT = 9_999_999_999;
+
 @Injectable()
 export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly promotions: PromotionsService,
   ) {}
-
-  private readonly orders = new Map<string, Order>();
 
   async create(dto: CreateOrderDto): Promise<Order> {
     const products = await this.prisma.product.findMany({
@@ -65,7 +66,7 @@ export class OrdersService {
         toppings.reduce((total, topping) => total + topping.extraPrice, 0);
       const lineTotal = unitPrice * item.quantity;
 
-      if (!Number.isSafeInteger(lineTotal)) {
+      if (!Number.isSafeInteger(lineTotal) || lineTotal > MAX_ORDER_AMOUNT) {
         throw new BadRequestException(
           'Tổng tiền sản phẩm vượt giới hạn hợp lệ.',
         );
@@ -87,32 +88,82 @@ export class OrdersService {
       (total, item) => total + item.lineTotal,
       0,
     );
-    if (!Number.isSafeInteger(totalAmount)) {
+    if (!Number.isSafeInteger(totalAmount) || totalAmount > MAX_ORDER_AMOUNT) {
       throw new BadRequestException('Tổng tiền đơn hàng vượt giới hạn hợp lệ.');
     }
 
+    // Sizes and toppings share the same product inventory.
+    const quantitiesByProduct = new Map<string, number>();
+    for (const item of items) {
+      const quantity =
+        (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity;
+      if (!Number.isSafeInteger(quantity) || quantity > 2_147_483_647) {
+        throw new BadRequestException(
+          `Sản phẩm không đủ tồn kho: ${item.productName}`,
+        );
+      }
+      quantitiesByProduct.set(item.productId, quantity);
+    }
+
     const orderCode = `ORD-${randomUUID()}`;
-    const promotion =
-      dto.promotionCode !== undefined
-        ? await this.promotions.consume(dto.promotionCode, totalAmount)
-        : null;
+    return this.prisma.$transaction(async (tx) => {
+      for (const [productId, quantity] of quantitiesByProduct) {
+        const result = await tx.product.updateMany({
+          where: { id: productId, stock: { gte: quantity } },
+          data: { stock: { decrement: quantity } },
+        });
+        if (result.count !== 1) {
+          throw new BadRequestException(
+            `Sản phẩm không đủ tồn kho: ${productsById.get(productId)!.name}`,
+          );
+        }
+      }
 
-    const order: Order = {
-      orderCode,
-      status: 'PENDING',
-      items,
-      totalAmount: promotion?.totalAmount ?? totalAmount,
-      ...(promotion
-        ? {
-            subtotalAmount: totalAmount,
-            discountAmount: promotion.discountAmount,
-            promotionCode: promotion.code,
-          }
-        : {}),
-      createdAt: new Date().toISOString(),
-    };
+      const promotion =
+        dto.promotionCode !== undefined
+          ? await this.promotions.consume(dto.promotionCode, totalAmount, tx)
+          : null;
+      const payableAmount = promotion?.totalAmount ?? totalAmount;
+      const saved = await tx.order.create({
+        data: {
+          // The public orderCode is the database primary key used by Payment.orderId.
+          id: orderCode,
+          status: 'PENDING',
+          subtotal: totalAmount,
+          discount: promotion?.discountAmount ?? 0,
+          promotionCode: promotion?.code ?? null,
+          total: payableAmount,
+          items: {
+            create: items.map((item) => ({
+              productId: item.productId,
+              size: item.size.id,
+              qty: item.quantity,
+              lineTotal: item.lineTotal,
+              snapshot: {
+                ...item,
+                size: { ...item.size },
+                toppings: item.toppings.map((topping) => ({ ...topping })),
+              },
+            })),
+          },
+        },
+        select: { id: true, createdAt: true },
+      });
 
-    this.orders.set(order.orderCode, order);
-    return order;
+      return {
+        orderCode: saved.id,
+        status: 'PENDING',
+        items,
+        totalAmount: payableAmount,
+        ...(promotion
+          ? {
+              subtotalAmount: totalAmount,
+              discountAmount: promotion.discountAmount,
+              promotionCode: promotion.code,
+            }
+          : {}),
+        createdAt: saved.createdAt.toISOString(),
+      } satisfies Order;
+    });
   }
 }

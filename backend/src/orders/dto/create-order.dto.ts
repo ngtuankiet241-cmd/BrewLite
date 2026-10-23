@@ -8,6 +8,7 @@ import {
   IsNotEmpty,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
   ValidateIf,
@@ -22,6 +23,7 @@ export class CreateOrderItemDto {
 
   @IsInt()
   @Min(1)
+  @Max(2_147_483_647)
   quantity!: number;
 
   @IsEnum(OrderSizeId)
