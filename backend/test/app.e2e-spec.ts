@@ -49,6 +49,7 @@ describe('AppController (e2e)', () => {
         name: expect.any(String),
         price: expect.any(Number),
         imageUrl: expect.any(String),
+        stock: expect.any(Number),
       });
     }
   });

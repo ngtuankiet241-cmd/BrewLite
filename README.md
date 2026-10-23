@@ -50,9 +50,9 @@ frontend.
 
 ## Current API
 
-`GET /products` returns an in-memory sample menu. A product currently contains:
-`id`, `name`, `price` (integer VND), and `imageUrl`. It does not yet return
-category, stock, or description. See [the API contract and open decisions](docs/api-contracts.md).
+`GET /products` returns products from the database. A product currently contains:
+`id`, `name`, `price` (integer VND), `imageUrl`, and `stock` (inventory quantity).
+It does not yet return category or description. See [the API contract and open decisions](docs/api-contracts.md).
 
 The backend enables CORS for local frontend requests. The sample product list
 is not persisted in a database. `POST /orders` creates a validated `PENDING`
