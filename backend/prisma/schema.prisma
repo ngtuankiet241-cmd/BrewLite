@@ -19,21 +19,24 @@ model Product {
 model User {
   id            String  @id @default(cuid())
   email         String  @unique
-  phone         String?  @unique
+  phone         String? @unique
   passwordHash  String
   loyaltyPoints Int     @default(0)
   orders        Order[]
 }
 
 model Order {
-  id        String      @id @default(cuid())
-  userId    String
-  status    String      @default("PENDING")
-  total     Decimal     @db.Decimal(12, 2)
-  createdAt DateTime    @default(now())
-  user      User        @relation(fields: [userId], references: [id])
-  items     OrderItem[]
-  payments  Payment[]
+  id            String      @id @default(cuid())
+  userId        String?
+  status        String      @default("PENDING")
+  total         Decimal     @db.Decimal(12, 2)
+  subtotal      Decimal?    @db.Decimal(12, 2)
+  discount      Decimal     @default(0) @db.Decimal(12, 2)
+  promotionCode String?
+  createdAt     DateTime    @default(now())
+  user          User?       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  items         OrderItem[]
+  payments      Payment[]
 }
 
 model OrderItem {
@@ -43,6 +46,8 @@ model OrderItem {
   size      String
   qty       Int
   lineTotal Decimal @db.Decimal(12, 2)
+  // Immutable product, option and price details at checkout; legacy rows may lack a snapshot.
+  snapshot  Json?
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product @relation(fields: [productId], references: [id])
 }

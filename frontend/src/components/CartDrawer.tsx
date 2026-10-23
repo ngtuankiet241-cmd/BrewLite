@@ -7,6 +7,7 @@ import PromotionInput, { type PromotionQuote } from "./PromotionInput";
 interface CartDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  onOrderCreated: () => void;
 }
 
 const formatPriceVND = (price: number): string =>
@@ -81,7 +82,11 @@ function CartQuantityControl({
   );
 }
 
-export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
+export default function CartDrawer({
+  isOpen,
+  onClose,
+  onOrderCreated,
+}: CartDrawerProps) {
   const {
     items,
     totalAmount,
@@ -177,6 +182,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       }
 
       clearCart();
+      onOrderCreated();
       setPromotionCode("");
       setPromotionSelection(null);
       setCheckoutNotice(
