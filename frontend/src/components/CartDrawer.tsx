@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useCart } from "../context/CartContext";
+import PromotionInput, { type PromotionQuote } from "./PromotionInput";
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -91,6 +92,16 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   } = useCart();
   const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [promotionCode, setPromotionCode] = useState("");
+  const [isValidatingPromotion, setIsValidatingPromotion] = useState(false);
+  const [promotionSelection, setPromotionSelection] = useState<{
+    cartItems: typeof items;
+    quote: PromotionQuote;
+  } | null>(null);
+  // Any change to products, options or quantities requires applying the code again.
+  const cartKey = JSON.stringify(items);
+  const appliedPromotion =
+    promotionSelection?.cartItems === items ? promotionSelection.quote : null;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -113,10 +124,13 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const handleClearCart = () => {
     clearCart();
     setCheckoutNotice(null);
+    setPromotionCode("");
+    setPromotionSelection(null);
   };
 
   const handleCreateOrder = async () => {
-    if (items.length === 0 || isSubmittingOrder) return;
+    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion)
+      return;
 
     setCheckoutNotice(null);
     setIsSubmittingOrder(true);
@@ -126,6 +140,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(appliedPromotion ? { promotionCode: appliedPromotion.code } : {}),
           items: items.map((item) => ({
             productId: item.id,
             quantity: item.quantity,
@@ -138,16 +153,14 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
 
       if (!response.ok) {
         const message =
-          typeof result === "object" &&
-          result !== null &&
-          "message" in result
+          typeof result === "object" && result !== null && "message" in result
             ? result.message
             : null;
         throw new Error(
           typeof message === "string"
             ? message
             : Array.isArray(message)
-              ? message.join(', ')
+              ? message.join(", ")
               : `Không thể tạo đơn (HTTP ${response.status}).`,
         );
       }
@@ -164,8 +177,14 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       }
 
       clearCart();
+      setPromotionCode("");
+      setPromotionSelection(null);
       setCheckoutNotice(
-        `Tạo đơn thành công: ${result.orderCode} · Trạng thái: ${result.status}.`,
+        `Tạo đơn thành công: ${result.orderCode} · Trạng thái: ${result.status}.${
+          "totalAmount" in result && typeof result.totalAmount === "number"
+            ? ` Tổng thanh toán: ${formatPriceVND(result.totalAmount)}.`
+            : ""
+        }`,
       );
     } catch (error) {
       setCheckoutNotice(
@@ -194,7 +213,10 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       >
         <header className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
           <div>
-            <h2 id="cart-title" className="text-lg font-extrabold text-stone-900">
+            <h2
+              id="cart-title"
+              className="text-lg font-extrabold text-stone-900"
+            >
               Giỏ hàng
             </h2>
             <p className="text-xs text-stone-500">{totalItemsCount} món</p>
@@ -310,21 +332,50 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
 
         {items.length > 0 && (
           <footer className="space-y-3 border-t border-stone-200 bg-white/80 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <PromotionInput
+              key={cartKey}
+              code={promotionCode}
+              orderAmount={totalAmount}
+              quote={appliedPromotion}
+              disabled={isSubmittingOrder}
+              onCodeChange={(code) => {
+                setPromotionCode(code);
+                setPromotionSelection(null);
+              }}
+              onApply={(quote) =>
+                setPromotionSelection({ cartItems: items, quote })
+              }
+              onPendingChange={setIsValidatingPromotion}
+            />
+            {appliedPromotion && (
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between text-stone-600">
+                  <span>Tạm tính</span>
+                  <span>{formatPriceVND(totalAmount)}</span>
+                </div>
+                <div className="flex justify-between text-emerald-800">
+                  <span>Giảm giá ({appliedPromotion.code})</span>
+                  <span>
+                    −{formatPriceVND(appliedPromotion.discountAmount)}
+                  </span>
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-stone-600">
                 Tổng thanh toán
               </span>
               <span className="text-lg font-extrabold text-emerald-950">
-                {formatPriceVND(totalAmount)}
+                {formatPriceVND(appliedPromotion?.totalAmount ?? totalAmount)}
               </span>
             </div>
             <button
               type="button"
               onClick={handleCreateOrder}
-              disabled={isSubmittingOrder}
+              disabled={isSubmittingOrder || isValidatingPromotion}
               className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-emerald-950/15 transition-colors hover:bg-emerald-900 disabled:cursor-wait disabled:opacity-70"
             >
-              {isSubmittingOrder ? 'Đang tạo đơn...' : 'Tiến hành đặt hàng'}
+              {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}
             </button>
           </footer>
         )}
