@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
+import { PromotionsService } from '../promotions/promotions.service.js';
 import {
   Order,
   OrderItem,
@@ -23,7 +24,10 @@ const TOPPINGS = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly promotions: PromotionsService,
+  ) {}
 
   private readonly orders = new Map<string, Order>();
 
@@ -87,11 +91,24 @@ export class OrdersService {
       throw new BadRequestException('Tổng tiền đơn hàng vượt giới hạn hợp lệ.');
     }
 
+    const orderCode = `ORD-${randomUUID()}`;
+    const promotion =
+      dto.promotionCode !== undefined
+        ? await this.promotions.consume(dto.promotionCode, totalAmount)
+        : null;
+
     const order: Order = {
-      orderCode: `ORD-${randomUUID()}`,
+      orderCode,
       status: 'PENDING',
       items,
-      totalAmount,
+      totalAmount: promotion?.totalAmount ?? totalAmount,
+      ...(promotion
+        ? {
+            subtotalAmount: totalAmount,
+            discountAmount: promotion.discountAmount,
+            promotionCode: promotion.code,
+          }
+        : {}),
       createdAt: new Date().toISOString(),
     };
 

@@ -34,5 +34,8 @@ export interface Order {
   status: OrderStatus;
   items: OrderItem[];
   totalAmount: number;
+  subtotalAmount?: number;
+  discountAmount?: number;
+  promotionCode?: string;
   createdAt: string;
 }

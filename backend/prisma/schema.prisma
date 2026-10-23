@@ -55,3 +55,17 @@ model Payment {
   method         String
   order          Order   @relation(fields: [orderId], references: [id])
 }
+
+model Promotion {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique
+  discountType String
+  value        Int
+  minOrder     Int      @default(0)
+  maxDiscount  Int?
+  usageLimit   Int?
+  usedCount    Int      @default(0)
+  startsAt     DateTime
+  expiresAt    DateTime
+  isActive     Boolean  @default(true)
+}

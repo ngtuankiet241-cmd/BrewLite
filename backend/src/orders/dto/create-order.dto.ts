@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
   ArrayUnique,
@@ -7,7 +7,10 @@ import {
   IsInt,
   IsNotEmpty,
   IsString,
+  Matches,
+  MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { OrderSizeId, OrderToppingId } from '../order.types.js';
@@ -31,6 +34,15 @@ export class CreateOrderItemDto {
 }
 
 export class CreateOrderDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  @IsString()
+  @Matches(/^[A-Z0-9_-]+$/, { message: 'Mã khuyến mãi không hợp lệ.' })
+  @MaxLength(64)
+  promotionCode?: string;
+
   @IsArray()
   @ArrayNotEmpty()
   @ValidateNested({ each: true })
