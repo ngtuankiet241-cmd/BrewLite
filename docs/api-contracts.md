@@ -10,7 +10,7 @@ the team still needs to make. Do not treat a pending item as an agreed contract.
 | Method and path | `GET /products` |
 | Local base URL | `http://localhost:3001` |
 | Success response | HTTP `200`; JSON array of products |
-| Data source | In-memory sample data |
+| Data source | Product records in the database, queried through Prisma |
 | CORS | Enabled by the NestJS application |
 
 Each product currently has this shape:
@@ -20,13 +20,15 @@ Each product currently has this shape:
   "id": "coffee-milk",
   "name": "Cà phê sữa",
   "price": 35000,
-  "imageUrl": "https://example.com/drink.jpg"
+  "imageUrl": "https://example.com/drink.jpg",
+  "stock": 100
 }
 ```
 
-`price` is an integer amount in VND. The backend product type does not currently
-include `category`, `stock`, or `description`; the frontend supplies defaults
-for those fields. The current sample menu contains 10 products.
+`price` is an integer amount in VND. `stock` is the integer inventory quantity
+stored in the database; the frontend displays it without a default quantity.
+The backend product type does not currently include `category` or `description`;
+the frontend supplies defaults for those fields. The seed menu contains 10 products.
 
 ## Confirmed: order creation
 
@@ -77,10 +79,10 @@ Start the backend and frontend using the instructions in the root
 [README](../README.md), then verify:
 
 1. `GET http://localhost:3001/products` returns HTTP 200 and a JSON array.
-2. Each product has `id`, `name`, `price`, and `imageUrl`.
+2. Each product has `id`, `name`, `price`, `imageUrl`, and `stock`.
 3. `POST /orders` rejects an empty cart, invalid product/option IDs, and invalid
    quantities; valid requests return an order in `PENDING`.
 4. The frontend menu displays the API products and offers a retry if loading
    fails.
-5. Confirm category, stock, and description behavior with the team before
+5. Confirm category and description behavior with the team before
    calling those fields part of the backend contract.

@@ -17,6 +17,7 @@ export interface BackendProduct {
   name: string;
   price: number;
   imageUrl: string;
+  stock: number;
 }
 
 /**
@@ -24,7 +25,6 @@ export interface BackendProduct {
  */
 export interface Product extends BackendProduct {
   category: string;
-  stock: number;
   description?: string;
 }
 
@@ -184,7 +184,7 @@ const handleLogout = () => {
 
       const data: BackendProduct[] = await response.json();
 
-      // Bổ sung category theo tên và thiết lập giá trị mặc định cho stock/description
+      // Bổ sung category theo tên và thiết lập giá trị mặc định cho description
       const mappedProducts: Product[] = data.map((item) => {
         const lowerName = item.name.toLowerCase();
 
@@ -212,7 +212,6 @@ const handleLogout = () => {
         return {
           ...item,
           category,
-          stock: (item as unknown as { stock?: number }).stock ?? 20,
           description:
             (item as unknown as { description?: string }).description ??
             defaultDescription,
