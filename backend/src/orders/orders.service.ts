@@ -1,12 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
 import { PromotionsService } from '../promotions/promotions.service.js';
+import { assertTransition } from './order-state-machine.js';
 import {
   Order,
   OrderItem,
   OrderSizeId,
+  OrderStatus,
   OrderToppingId,
 } from './order.types.js';
 
@@ -31,6 +38,34 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly promotions: PromotionsService,
   ) {}
+
+  async updateStatus(
+    orderCode: string,
+    nextStatus: OrderStatus,
+  ): Promise<Pick<Order, 'orderCode' | 'status'>> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderCode },
+      select: { status: true },
+    });
+    if (!order) {
+      throw new NotFoundException('Không tìm thấy đơn hàng.');
+    }
+
+    assertTransition(order.status, nextStatus);
+
+    // Only update if the persisted status still matches the one we validated.
+    const result = await this.prisma.order.updateMany({
+      where: { id: orderCode, status: order.status },
+      data: { status: nextStatus },
+    });
+    if (result.count !== 1) {
+      throw new ConflictException(
+        'Trạng thái đơn hàng đã thay đổi. Vui lòng thử lại.',
+      );
+    }
+
+    return { orderCode, status: nextStatus };
+  }
 
   async create(dto: CreateOrderDto): Promise<Order> {
     const products = await this.prisma.product.findMany({
