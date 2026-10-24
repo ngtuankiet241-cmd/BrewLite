@@ -119,6 +119,7 @@ export default function MenuPage() {
   // kiểm tra đăng nhập 
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   // Xử lý khi đăng nhập thành công
 const handleLoginSuccess = (user: AuthUser, token: string) => {
   setAuthUser(user);
@@ -353,8 +354,13 @@ const handleLogout = () => {
    * Xử lý khi nhấn nút "Thêm vào giỏ" trong Modal:
    * Cập nhật đúng số lượng & tổng tiền, mở Modal Popup Thông Báo Thành Công
    */
-  const handleAddToCart = () => {
-    if (!selectedProduct) return;
+const handleAddToCart = () => {
+  if (!authUser || !localStorage.getItem("brewlite_access_token")) {
+    setIsAuthOpen(true);
+    return;
+  }
+
+  if (!selectedProduct) return;
 
     const parsedQuantity = Number(quantityInput);
     const quantityToAdd =
@@ -465,26 +471,90 @@ const handleLogout = () => {
         </button>
       )}
 
-      {/* Giữ nguyên nút menu */}
+     {/* MENU NGƯỜI DÙNG */}
+<div className="relative">
+  <button
+    type="button"
+    aria-label="Mở menu người dùng"
+    aria-expanded={isUserMenuOpen}
+    onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+    className="p-2 rounded-xl text-stone-600 hover:text-emerald-900 hover:bg-stone-200/60 transition-all"
+  >
+    <svg
+      className="w-5 h-5 stroke-current"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="14" y2="17" />
+    </svg>
+  </button>
+
+  {isUserMenuOpen && (
+    <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-stone-200 py-2 z-50">
       <button
         type="button"
-        aria-label="Mở danh mục menu"
-        onClick={() => alert("Menu tùy chọn đang được phát triển")}
-        className="p-2 rounded-xl text-stone-600 hover:text-emerald-900 hover:bg-stone-200/60 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+        onClick={() => {
+          setIsUserMenuOpen(false);
+          window.location.href = "/";
+        }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-stone-100"
       >
-        <svg
-          className="w-5 h-5 stroke-current"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <line x1="4" y1="7" x2="20" y2="7" />
-          <line x1="4" y1="12" x2="20" y2="12" />
-          <line x1="4" y1="17" x2="14" y2="17" />
-        </svg>
+        🏠 Trang chủ
       </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setIsUserMenuOpen(false);
+          if (!authUser) {
+            setIsAuthOpen(true);
+          } else {
+            window.location.href = "/account";
+          }
+        }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-stone-100"
+      >
+        👤 Thông tin tài khoản
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setIsUserMenuOpen(false);
+          if (!authUser) {
+            setIsAuthOpen(true);
+          } else {
+            window.location.href = "/orders/history";
+          }
+        }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-stone-100"
+      >
+        🧾 Lịch sử đặt hàng
+      </button>
+
+      {authUser && (
+        <>
+          <div className="border-t border-stone-200 my-1" />
+          <button
+            type="button"
+            onClick={() => {
+              setIsUserMenuOpen(false);
+              handleLogout();
+            }}
+            className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
+          >
+            🚪 Đăng xuất
+          </button>
+        </>
+      )}
+    </div>
+  )}
+</div>
     </div>
   </div>
 
@@ -771,7 +841,14 @@ const handleLogout = () => {
           <div className="p-3 bg-gradient-to-t from-[#FCFBF8] via-[#FCFBF8]/95 to-transparent pointer-events-auto">
             <button
               type="button"
-              onClick={() => setIsCartOpen(true)}
+              onClick={() => {
+  if (!authUser || !localStorage.getItem("brewlite_access_token")) {
+    setIsAuthOpen(true);
+    return;
+  }
+
+  setIsCartOpen(true);
+}}
               className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-semibold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-900/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer"
             >
               {/* Biểu tượng Giỏ hàng và số lượng */}

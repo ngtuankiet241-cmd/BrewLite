@@ -89,8 +89,11 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     removeFromCart,
     clearCart,
   } = useCart();
-  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
-  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+const [currentOrderCode, setCurrentOrderCode] = useState<string | null>(null);
+const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -115,68 +118,148 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     setCheckoutNotice(null);
   };
 
-  const handleCreateOrder = async () => {
-    if (items.length === 0 || isSubmittingOrder) return;
 
-    setCheckoutNotice(null);
-    setIsSubmittingOrder(true);
+const handleCreateOrder = async () => {
+  if (items.length === 0 || isSubmittingOrder) return;
 
-    try {
-      const response = await fetch("http://localhost:3001/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: items.map((item) => ({
-            productId: item.id,
-            quantity: item.quantity,
-            sizeId: item.size.id,
-            toppingIds: item.toppings.map((topping) => topping.id),
-          })),
-        }),
-      });
-      const result: unknown = await response.json();
+  const token = localStorage.getItem("brewlite_access_token");
 
-      if (!response.ok) {
-        const message =
-          typeof result === "object" &&
-          result !== null &&
-          "message" in result
-            ? result.message
-            : null;
-        throw new Error(
-          typeof message === "string"
-            ? message
-            : Array.isArray(message)
-              ? message.join(', ')
-              : `Không thể tạo đơn (HTTP ${response.status}).`,
-        );
-      }
+  if (!token) {
+    setCheckoutNotice("Vui lòng đăng nhập trước khi đặt hàng.");
+    return;
+  }
 
-      if (
-        typeof result !== "object" ||
-        result === null ||
-        !("orderCode" in result) ||
-        typeof result.orderCode !== "string" ||
-        !("status" in result) ||
-        result.status !== "PENDING"
-      ) {
-        throw new Error("Máy chủ trả về thông tin đơn hàng không hợp lệ.");
-      }
+  setCheckoutNotice(null);
+  setIsSubmittingOrder(true);
 
-      clearCart();
-      setCheckoutNotice(
-        `Tạo đơn thành công: ${result.orderCode} · Trạng thái: ${result.status}.`,
+  try {
+    const response = await fetch("http://localhost:3001/orders", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        items: items.map((item) => ({
+          productId: item.id,
+          quantity: item.quantity,
+          sizeId: item.size.id,
+          toppingIds: item.toppings.map((topping) => topping.id),
+        })),
+      }),
+    });
+
+    const result: unknown = await response.json();
+
+    if (!response.ok) {
+      const message =
+        typeof result === "object" &&
+        result !== null &&
+        "message" in result
+          ? result.message
+          : null;
+
+      throw new Error(
+        typeof message === "string"
+          ? message
+          : Array.isArray(message)
+            ? message.join(", ")
+            : `Không thể tạo đơn (HTTP ${response.status}).`,
       );
-    } catch (error) {
-      setCheckoutNotice(
-        error instanceof Error
-          ? `Không thể tạo đơn: ${error.message}. Giỏ hàng vẫn được giữ để thử lại.`
-          : "Không thể kết nối máy chủ để tạo đơn. Giỏ hàng vẫn được giữ để thử lại.",
-      );
-    } finally {
-      setIsSubmittingOrder(false);
     }
-  };
+
+    if (
+      typeof result !== "object" ||
+      result === null ||
+      !("orderCode" in result) ||
+      typeof result.orderCode !== "string" ||
+      !("status" in result) ||
+      result.status !== "PENDING"
+    ) {
+      throw new Error("Máy chủ trả về thông tin đơn hàng không hợp lệ.");
+    }
+
+    setCurrentOrderCode(result.orderCode);
+    setCheckoutNotice(
+      `Tạo đơn thành công: ${result.orderCode}. Vui lòng thanh toán.`,
+    );
+  } catch (error) {
+    setCheckoutNotice(
+      error instanceof Error
+        ? `Không thể tạo đơn: ${error.message}. Giỏ hàng vẫn được giữ để thử lại.`
+        : "Không thể kết nối máy chủ để tạo đơn. Giỏ hàng vẫn được giữ để thử lại.",
+    );
+  } finally {
+    setIsSubmittingOrder(false);
+  }
+};
+
+const handlePayment = async () => {
+  if (!currentOrderCode || isSubmittingPayment) return;
+
+  setIsSubmittingPayment(true);
+  setCheckoutNotice(null);
+
+  try {
+    const token = localStorage.getItem("brewlite_access_token");
+
+    if (!token) {
+      throw new Error("Vui lòng đăng nhập trước khi thanh toán.");
+    }
+
+    const response = await fetch("http://localhost:3001/payments", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        orderCode: currentOrderCode,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.message || "Không thể khởi tạo thanh toán."
+      );
+    }
+
+    if (
+      !data.checkoutUrl ||
+      !data.formFields ||
+      typeof data.formFields !== "object"
+    ) {
+      throw new Error("Dữ liệu thanh toán từ server không hợp lệ.");
+    }
+
+    // Tạo form POST theo các trường do SDK SePay trả về.
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = data.checkoutUrl;
+
+    for (const [key, value] of Object.entries(data.formFields)) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = key;
+      input.value = String(value ?? "");
+      form.appendChild(input);
+    }
+
+    document.body.appendChild(form);
+    form.submit();
+  } catch (error) {
+    setCheckoutNotice(
+      error instanceof Error
+        ? error.message
+        : "Đã xảy ra lỗi khi khởi tạo thanh toán."
+    );
+    setIsSubmittingPayment(false);
+  }
+};
+
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-center">
@@ -299,35 +382,70 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
           )}
         </div>
 
-        {checkoutNotice && (
-          <p
-            role="status"
-            className="mx-4 mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900"
-          >
-            {checkoutNotice}
-          </p>
-        )}
+       {checkoutNotice && (
+  <p
+    role="status"
+    className="mx-4 mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900"
+  >
+    {checkoutNotice}
+  </p>
+)}
 
-        {items.length > 0 && (
-          <footer className="space-y-3 border-t border-stone-200 bg-white/80 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-stone-600">
-                Tổng thanh toán
-              </span>
-              <span className="text-lg font-extrabold text-emerald-950">
-                {formatPriceVND(totalAmount)}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleCreateOrder}
-              disabled={isSubmittingOrder}
-              className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-emerald-950/15 transition-colors hover:bg-emerald-900 disabled:cursor-wait disabled:opacity-70"
-            >
-              {isSubmittingOrder ? 'Đang tạo đơn...' : 'Tiến hành đặt hàng'}
-            </button>
-          </footer>
-        )}
+{items.length > 0 && (
+  <footer className="space-y-3 border-t border-stone-200 bg-white/80 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <div className="flex items-center justify-between">
+      <span className="text-sm font-semibold text-stone-600">
+        Tổng thanh toán
+      </span>
+      <span className="text-lg font-extrabold text-emerald-950">
+        {formatPriceVND(totalAmount)}
+      </span>
+    </div>
+
+    {!currentOrderCode ? (
+      <button
+        type="button"
+        onClick={handleCreateOrder}
+        disabled={isSubmittingOrder}
+        className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-emerald-950/15 transition-colors hover:bg-emerald-900 disabled:cursor-wait disabled:opacity-70"
+      >
+        {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}
+      </button>
+    ) : (
+      <div className="space-y-3 rounded-2xl border border-stone-200 p-3">
+        <h3 className="font-bold text-stone-900">
+          Thanh toán đơn hàng
+        </h3>
+
+        {currentOrderCode && (
+  <div className="mt-4 space-y-3">
+    <p>
+      Mã đơn hàng: <strong>{currentOrderCode}</strong>
+    </p>
+
+    <button
+      type="button"
+      onClick={handlePayment}
+      disabled={isSubmittingPayment}
+      className="w-full rounded-lg bg-amber-600 px-4 py-3
+                 font-semibold text-white disabled:opacity-50"
+    >
+      {isSubmittingPayment
+        ? "Đang chuyển đến SePay..."
+        : "Thanh toán với SePay Sandbox"}
+    </button>
+
+    {checkoutNotice && (
+      <p className="text-sm text-red-600">
+        {checkoutNotice}
+      </p>
+    )}
+  </div>
+)}
+      </div>
+    )}
+  </footer>
+)}
       </section>
     </div>
   );

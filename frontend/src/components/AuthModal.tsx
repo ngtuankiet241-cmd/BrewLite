@@ -28,6 +28,8 @@ export default function AuthModal({
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -254,9 +256,10 @@ export default function AuthModal({
             >
               Mật khẩu
             </label>
+            <div className="relative">
             <input
               id="auth-password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               autoComplete={
                 mode === "login" ? "current-password" : "new-password"
               }
@@ -267,8 +270,22 @@ export default function AuthModal({
               placeholder={
                 mode === "register" ? "Ít nhất 8 ký tự" : "Nhập mật khẩu"
               }
-              className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-3 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10"
+              className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-3 pr-12 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10"
             />
+              <button
+                type="button"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                aria-pressed={showPassword}
+                className="absolute inset-y-0 right-3 flex items-center text-stone-500 hover:text-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded"
+              >
+                {showPassword ? (
+                  <EyeOffIcon />
+                ) : (
+                  <EyeIcon />
+                )}
+              </button>
+            </div>
           </div>
 
           {mode === "register" && (
@@ -279,17 +296,28 @@ export default function AuthModal({
               >
                 Xác nhận mật khẩu
               </label>
+              <div className="relative">
               <input
                 id="auth-confirm-password"
-                type="password"
+                type={showConfirmPassword ? "text" : "password"}
                 autoComplete="new-password"
                 required
                 minLength={8}
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 placeholder="Nhập lại mật khẩu"
-                className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-3 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10"
+                className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-3 pr-12 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10"
               />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((value) => !value)}
+                  aria-label={showConfirmPassword ? "Ẩn mật khẩu xác nhận" : "Hiện mật khẩu xác nhận"}
+                  aria-pressed={showConfirmPassword}
+                  className="absolute inset-y-0 right-3 flex items-center text-stone-500 hover:text-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded"
+                >
+                  {showConfirmPassword ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </div>
             </div>
           )}
 
@@ -320,5 +348,25 @@ export default function AuthModal({
         </p>
       </section>
     </div>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3l18 18" />
+      <path d="M10.6 5.1A11 11 0 0 1 12 5c6.4 0 10 7 10 7a16 16 0 0 1-3.3 4.2" />
+      <path d="M6.2 6.2C3.5 8.1 2 12 2 12s3.6 7 10 7a10 10 0 0 0 4.3-1" />
+      <path d="M10 10a3 3 0 0 0 4 4" />
+    </svg>
   );
 }

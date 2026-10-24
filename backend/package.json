@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
+    "@nestjs/config": "^12.0.1",
     "@nestjs/core": "^12.0.1",
     "@nestjs/jwt": "^12.0.3",
     "@nestjs/platform-express": "^12.0.1",
@@ -31,7 +32,8 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "sepay-pg-node": "^1.0.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^12.0.0",
@@ -53,5 +55,12 @@
     "typescript": "^6.0.2",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^4.1.2"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "bcrypt@6.0.0": true,
+    "esbuild@0.28.2": true
   }
 }
