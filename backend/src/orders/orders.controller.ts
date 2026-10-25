@@ -1,8 +1,8 @@
-
 import {
   Body,
   Controller,
   Get,
+  Headers,
   Post,
   Req,
   UseGuards,
@@ -30,6 +30,7 @@ export class OrdersController {
   @Post()
   create(
     @Req() request: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body(
       new ValidationPipe({
         transform: true,
@@ -39,6 +40,6 @@ export class OrdersController {
     )
     dto: CreateOrderDto,
   ): Promise<Order> {
-    return this.ordersService.create(dto, request.user.sub);
+    return this.ordersService.create(dto, request.user.sub, idempotencyKey);
   }
 }

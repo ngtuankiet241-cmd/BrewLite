@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { withIdempotency } from '../prisma/idempotency.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
 import { PromotionsService } from '../promotions/promotions.service.js';
 import { assertTransition } from './order-state-machine.js';
@@ -81,9 +82,43 @@ export class OrdersService {
     });
   }
 
-  async create(dto: CreateOrderDto, userId?: string): Promise<Order> {
+  async create(
+    dto: CreateOrderDto,
+    userId?: string,
+    idempotencyKey?: string,
+  ): Promise<Order> {
+    if (idempotencyKey !== undefined) {
+      if (!userId) {
+        throw new BadRequestException('Vui lòng đăng nhập để đặt hàng.');
+      }
+      return withIdempotency(
+        this.prisma,
+        userId,
+        'orders.create',
+        idempotencyKey,
+        {
+          items: dto.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            sizeId: item.sizeId,
+            toppingIds: item.toppingIds,
+          })),
+          promotionCode: dto.promotionCode?.trim().toUpperCase() ?? null,
+          pointsToRedeem: dto.pointsToRedeem ?? 0,
+        },
+        (tx) => this.createOrder(dto, userId, tx),
+      );
+    }
+    return this.createOrder(dto, userId);
+  }
+
+  private async createOrder(
+    dto: CreateOrderDto,
+    userId?: string,
+    transaction?: Prisma.TransactionClient,
+  ): Promise<Order> {
     const productIds = [...new Set(dto.items.map((item) => item.productId))];
-    const products = await this.prisma.product.findMany({
+    const products = await (transaction ?? this.prisma).product.findMany({
       where: { id: { in: productIds } },
       select: { id: true, name: true, price: true },
     });
@@ -141,7 +176,7 @@ export class OrdersService {
     }
 
     const orderCode = `ORD-${randomUUID()}`;
-    return this.prisma.$transaction(async (tx) => {
+    const persist = async (tx: Prisma.TransactionClient): Promise<Order> => {
       for (const [productId, quantity] of quantitiesByProduct) {
         const result = await tx.product.updateMany({
           where: { id: productId, stock: { gte: quantity } },
@@ -234,7 +269,10 @@ export class OrdersService {
           : {}),
         createdAt: saved.createdAt.toISOString(),
       } satisfies Order;
-    });
+    };
+    return transaction
+      ? persist(transaction)
+      : this.prisma.$transaction(persist);
   }
 
   // Lấy lịch sử đơn hàng của tài khoản đang đăng nhập.

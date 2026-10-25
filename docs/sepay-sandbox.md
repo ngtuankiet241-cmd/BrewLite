@@ -38,6 +38,10 @@ webhook integration. Sandbox payments are simulated.
 Never confirm payment from the browser redirect alone. The backend validates the
 IPN secret, invoice code, currency, and amount before marking an order paid.
 
+Checkout retries must reuse the original `Idempotency-Key`. Both order creation
+and payment initialization persist successful results in PostgreSQL; repeated
+IPNs settle the order once. See [idempotency rules and tests](idempotency.md).
+
 `SEPAY_SECRET_KEY` is the merchant secret supplied by SePay and signs checkout
 requests. `SEPAY_IPN_SECRET_KEY` is the callback authentication value configured
 in the IPN settings. Setting both variables to a value you invented does not
