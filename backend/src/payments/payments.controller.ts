@@ -4,6 +4,8 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Post,
   Query,
   Req,
@@ -55,6 +57,7 @@ export class PaymentsController {
   }
 
   @Post('ipn')
+  @HttpCode(HttpStatus.OK)
   ipn(
     @Headers('x-secret-key') secretKey: string | undefined,
     @Body() body: Record<string, unknown>,

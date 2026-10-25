@@ -3,31 +3,33 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-
-type AuthUser = {
-  id: string;
-  email: string;
-  phone: string;
-  loyaltyPoints: number;
-};
+import { fetchAccount, type Account } from "../../lib/account";
 
 export default function AccountPage() {
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUser] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    try {
-      const token = localStorage.getItem("brewlite_access_token");
-      const savedUser = localStorage.getItem("brewlite_user");
-
-      if (token && savedUser) {
-        setUser(JSON.parse(savedUser) as AuthUser);
-      }
-    } catch (error) {
-      console.error("Lỗi đọc thông tin tài khoản:", error);
-    } finally {
-      setLoading(false);
-    }
+    const controller = new AbortController();
+    const refresh = () => {
+      fetchAccount(controller.signal).then((data) => {
+        if (controller.signal.aborted) return;
+        setUser(data);
+        setError("");
+      }).catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(cause instanceof Error ? cause.message : "Không thể tải tài khoản.");
+      }).finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      controller.abort();
+      window.removeEventListener("focus", refresh);
+    };
   }, []);
 
   if (loading) {
@@ -52,6 +54,8 @@ export default function AccountPage() {
             BrewLite • Quản lý tài khoản cá nhân
           </p>
         </header>
+
+        {error && <p role="alert" className="m-5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{error}</p>}
 
         {!user ? (
           <div className="p-6 text-center">
@@ -118,8 +122,10 @@ export default function AccountPage() {
                 {user.loyaltyPoints ?? 0}
               </p>
               <p className="text-xs text-emerald-100 mt-2">
-                Điểm được lưu trong thông tin đăng nhập.
+                Mỗi {user.loyaltyPolicy.spendPerPoint.toLocaleString("vi-VN")}đ thực trả nhận 1 điểm.
+                {" "}1 điểm đổi {user.loyaltyPolicy.pointValue.toLocaleString("vi-VN")}đ giảm giá cho đơn tiếp theo.
               </p>
+              <p className="mt-2 text-sm text-emerald-100">Có thể quy đổi {(user.loyaltyPoints * user.loyaltyPolicy.pointValue).toLocaleString("vi-VN")}đ.</p>
             </div>
 
             <Link

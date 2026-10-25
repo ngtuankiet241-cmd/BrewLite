@@ -1,7 +1,9 @@
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { API_URL } from "../../../lib/account";
 import { useCart } from "../../../context/CartContext";
 
 type PaymentResult = {
@@ -9,12 +11,11 @@ type PaymentResult = {
   message: string;
 };
 
-const API_URL = "http://localhost:3001";
-
 function getPaymentResult(data: unknown): PaymentResult {
   const result = data as {
     status?: string;
     paymentStatus?: string;
+    pointsEarned?: number;
     order?: {
       status?: string;
       paymentStatus?: string;
@@ -33,7 +34,7 @@ function getPaymentResult(data: unknown): PaymentResult {
   if (["PAID", "SUCCESS", "COMPLETED", "SUCCEEDED"].includes(value)) {
     return {
       status: "success",
-      message: "Đơn hàng đã được xác nhận thanh toán thành công.",
+      message: `Đơn hàng đã được xác nhận thanh toán thành công.${result.pointsEarned ? ` Bạn được cộng ${result.pointsEarned.toLocaleString("vi-VN")} điểm tích lũy.` : ""}`,
     };
   }
 
@@ -61,42 +62,22 @@ function getPaymentResult(data: unknown): PaymentResult {
   };
 }
 
-export default function PaymentResultPage() {
-    const { clearCart, isHydrated } = useCart();
-  const [orderCode, setOrderCode] = useState("");
-  const [result, setResult] = useState<PaymentResult>({
-    status: "loading",
-    message: "Đang kiểm tra trạng thái đơn hàng...",
-  });
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setOrderCode(params.get("orderCode") ?? "");
-  }, []);
-
-  const checkPaymentStatus = useCallback(async () => {
+async function fetchPaymentResult(orderCode: string, signal?: AbortSignal): Promise<PaymentResult> {
     if (!orderCode) {
-      setResult({
+      return {
         status: "error",
         message: "Không tìm thấy mã đơn hàng trong đường dẫn.",
-      });
-      return;
+      };
     }
 
     const token = localStorage.getItem("brewlite_access_token");
 
     if (!token) {
-      setResult({
+      return {
         status: "error",
         message: "Bạn cần đăng nhập lại để kiểm tra trạng thái đơn hàng.",
-      });
-      return;
+      };
     }
-
-    setResult({
-      status: "loading",
-      message: "Đang kiểm tra trạng thái đơn hàng...",
-    });
 
     try {
       const response = await fetch(
@@ -107,6 +88,7 @@ export default function PaymentResultPage() {
             Authorization: `Bearer ${token}`,
           },
           cache: "no-store",
+          signal,
         }
       );
 
@@ -119,23 +101,45 @@ export default function PaymentResultPage() {
       }
 
       const data: unknown = await response.json();
-      setResult(getPaymentResult(data));
+      return getPaymentResult(data);
     } catch (error) {
-      setResult({
+      return {
         status: "error",
         message:
           error instanceof Error
             ? error.message
             : "Không thể kết nối đến máy chủ.",
-      });
+      };
     }
-  }, [orderCode]);
+}
+
+function PaymentResultContent() {
+  const { clearCart, isHydrated } = useCart();
+  const router = useRouter();
+  const params = useSearchParams();
+  const orderCode = params.get("orderCode") ?? "";
+  const [result, setResult] = useState<PaymentResult>({
+    status: "loading", message: "Đang kiểm tra trạng thái đơn hàng...",
+  });
+
+  const checkPaymentStatus = () => {
+    setResult({ status: "loading", message: "Đang kiểm tra trạng thái đơn hàng..." });
+    void fetchPaymentResult(orderCode).then(setResult);
+  };
 
   useEffect(() => {
-    if (orderCode) {
-      checkPaymentStatus();
-    }
-  }, [orderCode, checkPaymentStatus]);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const load = async () => {
+      const next = await fetchPaymentResult(orderCode, controller.signal);
+      if (controller.signal.aborted) return;
+      setResult(next);
+      if (next.status === "pending" && attempts++ < 15) timer = setTimeout(load, 2000);
+    };
+    void load();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [orderCode]);
   useEffect(() => {
   if (!isHydrated) return;
 
@@ -215,7 +219,7 @@ export default function PaymentResultPage() {
         <button
           type="button"
           onClick={() => {
-            window.location.href = "/";
+            router.push("/");
           }}
           className="mt-3 w-full rounded-xl border border-stone-200 px-4 py-3 font-semibold text-stone-700 transition hover:bg-stone-50"
         >
@@ -229,4 +233,10 @@ export default function PaymentResultPage() {
       </section>
     </main>
   );
+}
+
+export default function PaymentResultPage() {
+  return <Suspense fallback={<p className="p-8 text-center">Đang kiểm tra thanh toán...</p>}>
+    <PaymentResultContent />
+  </Suspense>;
 }

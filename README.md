@@ -103,6 +103,12 @@ Set `DATABASE_URL` in `backend/.env` for PostgreSQL and `JWT_SECRET` for login.
 `.env.example` contains configuration placeholders. Never commit `.env` files,
 passwords, JWT secrets, or payment credentials.
 
+For SePay Sandbox configuration and payment troubleshooting, see
+[the SePay setup guide](docs/sepay-sandbox.md).
+
+Customers earn 1 point per 1,000 VND paid and can redeem each point for a 10 VND
+discount in the cart. See [the loyalty rules and API](docs/loyalty-points.md).
+
 ## Team workflow
 
 1. Agree on a task and its acceptance criteria.

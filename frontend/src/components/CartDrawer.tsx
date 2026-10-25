@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import PromotionInput, { type PromotionQuote } from "./PromotionInput";
+import { API_URL, fetchAccount, type Account } from "../lib/account";
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -87,6 +89,7 @@ export default function CartDrawer({
   onClose,
   onOrderCreated,
 }: CartDrawerProps) {
+  const router = useRouter();
   const {
     items,
     totalAmount,
@@ -99,6 +102,12 @@ export default function CartDrawer({
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [pointsError, setPointsError] = useState<string | null>(null);
+  const [confirmedTotal, setConfirmedTotal] = useState<number | null>(null);
+  const [pointsSelection, setPointsSelection] = useState<{
+    cartItems: typeof items; promotionCode: string | undefined; points: number;
+  } | null>(null);
   const [promotionCode, setPromotionCode] = useState("");
   const [isValidatingPromotion, setIsValidatingPromotion] = useState(false);
   const [promotionSelection, setPromotionSelection] = useState<{
@@ -108,6 +117,29 @@ export default function CartDrawer({
   const cartKey = JSON.stringify(items);
   const appliedPromotion =
     promotionSelection?.cartItems === items ? promotionSelection.quote : null;
+  const pointsToRedeem = pointsSelection?.cartItems === items &&
+    pointsSelection.promotionCode === appliedPromotion?.code ? pointsSelection.points : 0;
+  const afterPromotion = appliedPromotion?.totalAmount ?? totalAmount;
+  const pointValue = account?.loyaltyPolicy.pointValue ?? 10;
+  const maxPoints = Math.min(account?.loyaltyPoints ?? 0, Math.floor(afterPromotion / pointValue));
+  const invalidPoints = !currentOrderCode && pointsToRedeem > maxPoints;
+  const pointsDiscount = pointsToRedeem * pointValue;
+  const payableAmount = confirmedTotal ?? Math.max(0, afterPromotion - pointsDiscount);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const controller = new AbortController();
+    fetchAccount(controller.signal).then((data) => {
+      if (controller.signal.aborted) return;
+      setAccount(data);
+      setPointsError(null);
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setAccount(null);
+      setPointsError(error instanceof Error ? error.message : "Không thể tải điểm thưởng.");
+    });
+    return () => controller.abort();
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -136,7 +168,7 @@ export default function CartDrawer({
   };
 
   const handleCreateOrder = async () => {
-    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion || currentOrderCode) return;
+    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion || currentOrderCode || invalidPoints) return;
 
     const token = localStorage.getItem("brewlite_access_token");
     if (!token) {
@@ -147,7 +179,7 @@ export default function CartDrawer({
     setCheckoutNotice(null);
     setIsSubmittingOrder(true);
     try {
-      const response = await fetch("http://localhost:3001/orders", {
+      const response = await fetch(`${API_URL}/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -155,6 +187,7 @@ export default function CartDrawer({
         },
         body: JSON.stringify({
           ...(appliedPromotion ? { promotionCode: appliedPromotion.code } : {}),
+          pointsToRedeem,
           items: items.map((item) => ({
             productId: item.id,
             quantity: item.quantity,
@@ -180,12 +213,19 @@ export default function CartDrawer({
       if (
         typeof result !== "object" || result === null ||
         !("orderCode" in result) || typeof result.orderCode !== "string" ||
-        !("status" in result) || result.status !== "PENDING"
+        !("status" in result) || !["PENDING", "PAID"].includes(String(result.status)) ||
+        !("totalAmount" in result) || typeof result.totalAmount !== "number"
       ) {
         throw new Error("Máy chủ trả về thông tin đơn hàng không hợp lệ.");
       }
       setCurrentOrderCode(result.orderCode);
+      setConfirmedTotal(result.totalAmount);
       onOrderCreated();
+      if (result.status === "PAID") {
+        clearCart();
+        router.push(`/payment/result?orderCode=${encodeURIComponent(result.orderCode)}`);
+        return;
+      }
       setCheckoutNotice(`Tạo đơn thành công: ${result.orderCode}. Vui lòng thanh toán.`);
       // Keep the cart until payment is completed or explicitly handled.
     } catch (error) {
@@ -212,7 +252,7 @@ export default function CartDrawer({
       throw new Error("Vui lòng đăng nhập trước khi thanh toán.");
     }
 
-    const response = await fetch("http://localhost:3001/payments", {
+    const response = await fetch(`${API_URL}/payments`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -417,6 +457,34 @@ export default function CartDrawer({
                 onPendingChange={setIsValidatingPromotion}
               />
             )}
+            {!currentOrderCode && (
+              <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                <div className="flex items-center justify-between text-sm">
+                  <label htmlFor="reward-points" className="font-semibold text-emerald-950">Dùng điểm thưởng</label>
+                  <span className="text-emerald-800">{account?.loyaltyPoints.toLocaleString("vi-VN") ?? "—"} điểm</span>
+                </div>
+                <div className="flex gap-2">
+                  <input id="reward-points" type="number" inputMode="numeric" min={0} max={maxPoints} step={1}
+                    value={pointsToRedeem}
+                    disabled={!account || isSubmittingOrder}
+                    onChange={(event) => {
+                      const points = Number(event.target.value);
+                      if (Number.isSafeInteger(points) && points >= 0) {
+                        setPointsSelection({ cartItems: items, promotionCode: appliedPromotion?.code, points });
+                      }
+                    }}
+                    aria-invalid={invalidPoints}
+                    className="min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900"
+                  />
+                  <button type="button" disabled={!account || isSubmittingOrder}
+                    onClick={() => setPointsSelection({ cartItems: items, promotionCode: appliedPromotion?.code, points: maxPoints })}
+                    className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50">Dùng tối đa</button>
+                </div>
+                <p className="text-xs text-stone-600">1 điểm = {formatPriceVND(pointValue)}. Điểm được trừ khi tạo đơn và hoàn lại khi hủy đơn.</p>
+                {pointsError && <p role="status" className="text-xs text-amber-800">{pointsError}</p>}
+                {invalidPoints && <p role="alert" className="text-xs text-rose-700">Chỉ có thể dùng tối đa {maxPoints.toLocaleString("vi-VN")} điểm cho đơn này.</p>}
+              </div>
+            )}
             {appliedPromotion && (
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between text-stone-600">
@@ -429,17 +497,24 @@ export default function CartDrawer({
                 </div>
               </div>
             )}
+            {pointsToRedeem > 0 && (
+              <div className="flex justify-between text-sm text-emerald-800">
+                <span>Giảm từ {pointsToRedeem.toLocaleString("vi-VN")} điểm</span>
+                <span>−{formatPriceVND(pointsDiscount)}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-stone-600">Tổng thanh toán</span>
               <span className="text-lg font-extrabold text-emerald-950">
-                {formatPriceVND(appliedPromotion?.totalAmount ?? totalAmount)}
+                {formatPriceVND(payableAmount)}
               </span>
             </div>
+            {account && <p className="text-xs text-stone-500">Nhận {Math.floor(payableAmount / account.loyaltyPolicy.spendPerPoint).toLocaleString("vi-VN")} điểm sau khi thanh toán thành công.</p>}
             {!currentOrderCode ? (
               <button
                 type="button"
                 onClick={handleCreateOrder}
-                disabled={isSubmittingOrder || isValidatingPromotion}
+                disabled={isSubmittingOrder || isValidatingPromotion || invalidPoints}
                 className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white disabled:opacity-70"
               >
                 {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}

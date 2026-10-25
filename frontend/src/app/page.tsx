@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import CartDrawer from "../components/CartDrawer";
 import { useCart } from "../context/CartContext";
 import AuthModal from "../components/AuthModal";
+import { fetchAccount } from "../lib/account";
 
 // ============================================================================
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES & INTERFACES)
@@ -234,18 +235,11 @@ const handleLogout = () => {
 
 // giữ trạng thái đăng nhập khi mở lại trang
   useEffect(() => {
-  try {
-    const savedUser = localStorage.getItem("brewlite_user");
-    const savedToken = localStorage.getItem("brewlite_access_token");
-
-    if (savedUser && savedToken) {
-      setAuthUser(JSON.parse(savedUser) as AuthUser);
-    }
-  } catch (error) {
-    console.error("Không thể khôi phục thông tin đăng nhập:", error);
-    localStorage.removeItem("brewlite_user");
-    localStorage.removeItem("brewlite_access_token");
-  }
+  const controller = new AbortController();
+  fetchAccount(controller.signal).then((account) => {
+    if (!controller.signal.aborted) setAuthUser({ ...account, phone: account.phone ?? "" });
+  }).catch(() => {});
+  return () => controller.abort();
 }, []);
 
   // Gọi fetch API khi component mount lần đầu
