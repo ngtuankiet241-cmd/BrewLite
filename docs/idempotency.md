@@ -92,5 +92,5 @@ Integration test gửi HTTP tuần tự vào PostgreSQL thực. Hai app đọc c
 Các fixture có ID riêng và được dọn sau test. Test dùng thông tin SePay giả
 để ký form cục bộ, không gọi cổng thanh toán bên ngoài.
 
-Đặt hàng đồng thời và kiểm thử không vượt tồn kho thuộc công việc riêng,
-sẽ thực hiện sau.
+Đặt hàng đồng thời và kiểm thử không vượt tồn kho được mô tả riêng tại
+[kiểm soát tồn kho](concurrent-inventory.md).

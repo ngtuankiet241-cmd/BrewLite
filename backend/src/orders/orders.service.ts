@@ -38,6 +38,9 @@ const TOPPINGS = {
 } satisfies Record<OrderToppingId, { name: string; extraPrice: number }>;
 
 const MAX_ORDER_AMOUNT = 9_999_999_999;
+const MAX_STOCK_ATTEMPTS = 5;
+
+class StockVersionConflict extends Error {}
 
 @Injectable()
 export class OrdersService {
@@ -87,6 +90,27 @@ export class OrdersService {
     userId?: string,
     idempotencyKey?: string,
   ): Promise<Order> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.createAttempt(dto, userId, idempotencyKey);
+      } catch (error) {
+        if (!(error instanceof StockVersionConflict)) throw error;
+        if (attempt >= MAX_STOCK_ATTEMPTS) {
+          throw new ConflictException(
+            'Tồn kho đang được cập nhật bởi đơn hàng khác. Vui lòng thử lại.',
+          );
+        }
+        // Retry the entire transaction, including idempotency, so earlier stock
+        // deductions cannot survive a conflict on a later product.
+      }
+    }
+  }
+
+  private async createAttempt(
+    dto: CreateOrderDto,
+    userId?: string,
+    idempotencyKey?: string,
+  ): Promise<Order> {
     if (idempotencyKey !== undefined) {
       if (!userId) {
         throw new BadRequestException('Vui lòng đăng nhập để đặt hàng.');
@@ -109,18 +133,26 @@ export class OrdersService {
         (tx) => this.createOrder(dto, userId, tx),
       );
     }
-    return this.createOrder(dto, userId);
+    return this.prisma.$transaction((tx) => this.createOrder(dto, userId, tx), {
+      isolationLevel: 'ReadCommitted',
+    });
   }
 
   private async createOrder(
     dto: CreateOrderDto,
-    userId?: string,
-    transaction?: Prisma.TransactionClient,
+    userId: string | undefined,
+    transaction: Prisma.TransactionClient,
   ): Promise<Order> {
     const productIds = [...new Set(dto.items.map((item) => item.productId))];
-    const products = await (transaction ?? this.prisma).product.findMany({
+    const products = await transaction.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, name: true, price: true },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        stock: true,
+        stockVersion: true,
+      },
     });
     const productsById = new Map(
       products.map((product) => [product.id, product]),
@@ -177,16 +209,27 @@ export class OrdersService {
 
     const orderCode = `ORD-${randomUUID()}`;
     const persist = async (tx: Prisma.TransactionClient): Promise<Order> => {
-      for (const [productId, quantity] of quantitiesByProduct) {
-        const result = await tx.product.updateMany({
-          where: { id: productId, stock: { gte: quantity } },
-          data: { stock: { decrement: quantity } },
-        });
-        if (result.count !== 1) {
+      // Acquire product rows in a consistent order for carts with reversed items.
+      for (const productId of [...quantitiesByProduct.keys()].sort()) {
+        const quantity = quantitiesByProduct.get(productId)!;
+        const product = productsById.get(productId)!;
+        if (product.stock < quantity) {
           throw new BadRequestException(
-            `Sản phẩm không đủ tồn kho: ${productsById.get(productId)!.name}`,
+            `Sản phẩm không đủ tồn kho: ${product.name}`,
           );
         }
+        const result = await tx.product.updateMany({
+          where: {
+            id: productId,
+            stockVersion: product.stockVersion,
+            stock: { gte: quantity },
+          },
+          data: {
+            stock: { decrement: quantity },
+            stockVersion: { increment: 1 },
+          },
+        });
+        if (result.count !== 1) throw new StockVersionConflict();
       }
 
       const promotion =
@@ -270,9 +313,7 @@ export class OrdersService {
         createdAt: saved.createdAt.toISOString(),
       } satisfies Order;
     };
-    return transaction
-      ? persist(transaction)
-      : this.prisma.$transaction(persist);
+    return persist(transaction);
   }
 
   // Lấy lịch sử đơn hàng của tài khoản đang đăng nhập.

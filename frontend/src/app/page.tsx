@@ -5,6 +5,7 @@ import CartDrawer from "../components/CartDrawer";
 import { useCart } from "../context/CartContext";
 import AuthModal from "../components/AuthModal";
 import { fetchAccount } from "../lib/account";
+import { getQuantityError } from "../lib/inventory";
 
 // ============================================================================
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES & INTERFACES)
@@ -145,7 +146,7 @@ const handleLogout = () => {
   // Danh mục đang được chọn để lọc (Tất cả, Cà phê, Trà trái cây, Khác)
   const [selectedCategory, setSelectedCategory] = useState<string>("Tất cả");
 
-  const { addToCart, totalItemsCount, totalAmount, isHydrated } = useCart();
+  const { items: cartItems, addToCart, totalItemsCount, totalAmount, isHydrated } = useCart();
   const [isCartOpen, setIsCartOpen] = useState(false);
 
   // --------------------------------------------------------------------------
@@ -160,6 +161,14 @@ const handleLogout = () => {
   // Số lượng món được chọn (mặc định là 1)
   const [quantity, setQuantity] = useState<number>(1);
   const [quantityInput, setQuantityInput] = useState("1");
+  const selectedStock = selectedProduct
+    ? products.find((product) => product.id === selectedProduct.id)?.stock ?? selectedProduct.stock
+    : 0;
+  const quantityInCart = selectedProduct
+    ? cartItems.reduce((sum, item) => sum + (item.id === selectedProduct.id ? item.quantity : 0), 0)
+    : 0;
+  const availableQuantity = Math.max(0, selectedStock - quantityInCart);
+  const quantityError = selectedProduct ? getQuantityError(quantityInput, availableQuantity) : null;
 
   // --------------------------------------------------------------------------
   // STATE CHO MODAL THÔNG BÁO THÀNH CÔNG (SUCCESS DIALOG POPUP)
@@ -282,9 +291,8 @@ const handleLogout = () => {
    * Xử lý tăng số lượng (tối đa không vượt quá tồn kho stock của sản phẩm)
    */
   const handleIncreaseQuantity = () => {
-    if (!selectedProduct) return;
-    const maxStock = selectedProduct.stock;
-    const nextQuantity = Math.min(maxStock, quantity + 1);
+    if (!selectedProduct || quantityError || quantity >= availableQuantity) return;
+    const nextQuantity = quantity + 1;
     setQuantity(nextQuantity);
     setQuantityInput(String(nextQuantity));
   };
@@ -295,19 +303,8 @@ const handleLogout = () => {
 
     const parsedQuantity = Number(value);
     if (Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0) {
-      setQuantity(Math.min(selectedProduct.stock, parsedQuantity));
+      setQuantity(parsedQuantity);
     }
-  };
-
-  const handleQuantityInputBlur = () => {
-    if (!selectedProduct) return;
-    const parsedQuantity = Number(quantityInput);
-    const normalizedQuantity =
-      Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0
-        ? Math.min(selectedProduct.stock, parsedQuantity)
-        : quantity;
-    setQuantity(normalizedQuantity);
-    setQuantityInput(String(normalizedQuantity));
   };
 
   /**
@@ -355,13 +352,9 @@ const handleLogout = () => {
       return;
     }
 
-    if (!selectedProduct || selectedProduct.stock <= 0) return;
+    if (!selectedProduct || !isHydrated || quantityError) return;
 
-    const parsedQuantity = Number(quantityInput);
-    const quantityToAdd =
-      Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0
-        ? Math.min(selectedProduct.stock, parsedQuantity)
-        : quantity;
+    const quantityToAdd = Number(quantityInput);
     setQuantity(quantityToAdd);
     setQuantityInput(String(quantityToAdd));
     const totalPrice = calculateTotalPrice(quantityToAdd);
@@ -892,6 +885,7 @@ const handleLogout = () => {
         </footer>
 
         <CartDrawer
+          products={products}
           isOpen={isCartOpen}
           onClose={() => setIsCartOpen(false)}
           onOrderCreated={fetchProducts}
@@ -1088,8 +1082,13 @@ const handleLogout = () => {
                       Số lượng
                     </span>
                     <span className="text-[11px] text-stone-500">
-                      Còn {selectedProduct.stock} món trong kho
+                      Còn {selectedStock} món trong kho
                     </span>
+                    {quantityInCart > 0 && (
+                      <span className="block text-[11px] text-stone-500">
+                        Đã có {quantityInCart} trong giỏ, có thể thêm {availableQuantity} món
+                      </span>
+                    )}
                   </div>
 
                   {/* Nút - / Số lượng / Nút + dạng Stepper bo tròn */}
@@ -1107,16 +1106,17 @@ const handleLogout = () => {
                       type="text"
                       inputMode="numeric"
                       aria-label="Nhập số lượng món"
+                      aria-invalid={Boolean(quantityError)}
+                      aria-describedby={quantityError ? "product-quantity-error" : undefined}
                       value={quantityInput}
                       onChange={(event) =>
                         handleQuantityInputChange(event.target.value)
                       }
-                      onBlur={handleQuantityInputBlur}
                       className="h-8 w-14 rounded-lg border border-stone-200 bg-white text-center text-sm font-bold text-stone-900 outline-none focus:border-emerald-700"
                     />
                     <button
                       type="button"
-                      disabled={quantity >= selectedProduct.stock}
+                      disabled={Boolean(quantityError) || quantity >= availableQuantity}
                       onClick={handleIncreaseQuantity}
                       aria-label="Tăng số lượng"
                       className="w-8 h-8 rounded-xl bg-white border border-stone-200 text-stone-800 flex items-center justify-center font-bold text-base shadow-xs disabled:opacity-35 disabled:cursor-not-allowed hover:bg-stone-50 active:scale-95 transition-all cursor-pointer"
@@ -1126,11 +1126,18 @@ const handleLogout = () => {
                   </div>
                 </div>
 
+                {quantityError && (
+                  <p id="product-quantity-error" role="alert" className="text-xs text-rose-700">
+                    {quantityError}
+                  </p>
+                )}
+
                 {/* NÚT THÊM VÀO GIỎ VỚI ĐƠN GIÁ ĐÃ NHÂN SỐ LƯỢNG */}
                 <button
                   type="button"
                   onClick={handleAddToCart}
-                  className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer"
+                  disabled={!isHydrated || Boolean(quantityError)}
+                  className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="text-sm">
                     Thêm vào giỏ • {quantity} {quantity > 1 ? "ly" : "món"}

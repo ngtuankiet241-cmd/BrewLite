@@ -39,6 +39,7 @@ the frontend supplies defaults for those fields. The seed menu contains 10 produ
 | Authentication | Required; Bearer JWT associates the order with the signed-in user |
 | Idempotency | Send `Idempotency-Key` and reuse it with the same body when retrying; replay returns the original result, changed content returns `409` |
 | Persistence | PostgreSQL through Prisma; the order, its items, inventory deduction and promotion usage are committed in one transaction |
+| Concurrent stock updates | Internal `stockVersion` check and increment; retry the whole transaction up to 5 attempts on a version conflict |
 | Status | New orders start as `PENDING`, or `PAID` when discounts/points cover the total |
 | Price handling | Backend looks up product prices and validates size/topping IDs; client prices are not accepted |
 
@@ -83,6 +84,14 @@ are added together across all sizes and toppings. If a product has insufficient
 stock (including zero stock), `POST /orders` returns HTTP `400` with a message
 identifying the product. The cart is retained on failure; after success, the
 frontend reloads the menu to display the updated inventory.
+
+Inventory is read and deducted within the same transaction using optimistic
+locking. Updates must match the product's stock version and sufficient quantity;
+the stock version increments with each successful deduction. A stale version
+rolls back the whole transaction before retrying. After five conflicting attempts,
+the API returns HTTP `409` and asks the client to retry. See
+[concurrent inventory and tests](concurrent-inventory.md) for the database
+guarantees and test commands.
 
 Creating the order and its items, deducting stock and consuming a promotion share
 one transaction. A failure rolls back all writes, including inventory deductions

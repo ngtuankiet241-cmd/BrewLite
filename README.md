@@ -74,6 +74,8 @@ order; successful checkout reloads the menu inventory. The frontend cart keeps
 its contents if order creation fails. Both order creation and SePay payment
 initialization support `Idempotency-Key`; retries reuse the original result.
 See [idempotency rules and tests](docs/idempotency.md) for the API rules.
+Concurrent orders use a stock version check and retry the transaction on a
+conflict. See [concurrent inventory and tests](docs/concurrent-inventory.md).
 Payments in this project are
 simulated and must not use real payment credentials.
 
@@ -94,7 +96,8 @@ The backend e2e suite requires the configured PostgreSQL database with migration
 applied and menu data seeded. It covers the product list, order creation,
 persistence after closing the app, stock deduction, insufficient stock, transaction
 rollback, two sequential requests with the same idempotency key,
-duplicate payment callbacks and concurrent promotion checkout. The persistence tests create unique
+duplicate payment callbacks, concurrent inventory with optimistic locking and
+concurrent promotion checkout. The persistence tests create unique
 fixtures and remove them after testing. See
 [the API contract](docs/api-contracts.md) for the order payload and validation
 rules.
