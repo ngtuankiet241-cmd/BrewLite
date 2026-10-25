@@ -16,18 +16,28 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const token = localStorage.getItem("brewlite_access_token");
-      const savedUser = localStorage.getItem("brewlite_user");
+    let active = true;
 
-      if (token && savedUser) {
-        setUser(JSON.parse(savedUser) as AuthUser);
+    void Promise.resolve().then(() => {
+      if (!active) return;
+
+      try {
+        const token = localStorage.getItem("brewlite_access_token");
+        const savedUser = localStorage.getItem("brewlite_user");
+
+        if (token && savedUser) {
+          setUser(JSON.parse(savedUser) as AuthUser);
+        }
+      } catch (error) {
+        console.error("Lỗi đọc thông tin tài khoản:", error);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error("Lỗi đọc thông tin tài khoản:", error);
-    } finally {
-      setLoading(false);
-    }
+    });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   if (loading) {

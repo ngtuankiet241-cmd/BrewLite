@@ -70,8 +70,18 @@ export default function PaymentResultPage() {
   });
 
   useEffect(() => {
+    let active = true;
     const params = new URLSearchParams(window.location.search);
-    setOrderCode(params.get("orderCode") ?? "");
+
+    void Promise.resolve().then(() => {
+      if (active) {
+        setOrderCode(params.get("orderCode") ?? "");
+      }
+    });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const checkPaymentStatus = useCallback(async () => {
@@ -132,9 +142,17 @@ export default function PaymentResultPage() {
   }, [orderCode]);
 
   useEffect(() => {
-    if (orderCode) {
-      checkPaymentStatus();
-    }
+    let active = true;
+
+    void Promise.resolve().then(() => {
+      if (active && orderCode) {
+        void checkPaymentStatus();
+      }
+    });
+
+    return () => {
+      active = false;
+    };
   }, [orderCode, checkPaymentStatus]);
   useEffect(() => {
   if (!isHydrated) return;

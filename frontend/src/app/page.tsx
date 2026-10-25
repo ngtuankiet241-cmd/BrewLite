@@ -234,19 +234,29 @@ const handleLogout = () => {
 
 // giữ trạng thái đăng nhập khi mở lại trang
   useEffect(() => {
-  try {
-    const savedUser = localStorage.getItem("brewlite_user");
-    const savedToken = localStorage.getItem("brewlite_access_token");
+    let active = true;
 
-    if (savedUser && savedToken) {
-      setAuthUser(JSON.parse(savedUser) as AuthUser);
-    }
-  } catch (error) {
-    console.error("Không thể khôi phục thông tin đăng nhập:", error);
-    localStorage.removeItem("brewlite_user");
-    localStorage.removeItem("brewlite_access_token");
-  }
-}, []);
+    void Promise.resolve().then(() => {
+      if (!active) return;
+
+      try {
+        const savedUser = localStorage.getItem("brewlite_user");
+        const savedToken = localStorage.getItem("brewlite_access_token");
+
+        if (savedUser && savedToken) {
+          setAuthUser(JSON.parse(savedUser) as AuthUser);
+        }
+      } catch (error) {
+        console.error("Không thể khôi phục thông tin đăng nhập:", error);
+        localStorage.removeItem("brewlite_user");
+        localStorage.removeItem("brewlite_access_token");
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Gọi fetch API khi component mount lần đầu
   useEffect(() => {

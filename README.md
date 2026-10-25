@@ -70,11 +70,11 @@ The backend enables CORS for local frontend requests. `POST /orders` creates a
 validated `PENDING` order in PostgreSQL, including item and price snapshots.
 The order, its items, stock deductions and any promotion usage are saved in one
 transaction, and orders survive backend restarts. Insufficient stock rejects the
-order; successful checkout reloads the menu inventory. The frontend cart keeps
-its contents if order creation fails. Checkout currently supports guests;
-associating a logged-in user and processing payment remain separate tasks.
-Payments in this project are
-simulated and must not use real payment credentials.
+order; successful checkout reloads the menu inventory. The repository also
+contains authentication, payment simulation, and order-history features; these
+still need to be verified together in an end-to-end run before they are treated
+as accepted. Payments in this project are simulated and must not use real
+payment credentials.
 
 ## Checks
 
@@ -97,6 +97,10 @@ fixtures and remove them after testing. See
 [the API contract](docs/api-contracts.md) for the order payload and validation
 rules.
 
+GitHub Actions runs backend build, lint, unit tests, and e2e tests against a
+temporary PostgreSQL service, plus frontend lint and production build, for pull
+requests and pushes to `main`.
+
 ## Environment variables
 
 Set `DATABASE_URL` in `backend/.env` for PostgreSQL and `JWT_SECRET` for login.
@@ -110,3 +114,13 @@ passwords, JWT secrets, or payment credentials.
 3. Create a branch for the task; do not commit directly to `main`.
 4. Make and test a focused change, then open a pull request for review.
 5. Update the progress workbook after the work is verified.
+
+## Kiệt's coordination checklist
+
+- Keep these setup and validation instructions aligned with the repository.
+- Track task owners, pull requests, blockers, and test evidence in the progress
+  workbook; a merged pull request alone does not mean a task passed acceptance.
+- Before a demo, confirm PostgreSQL, migrations, and seed data are ready, then
+  run the backend and frontend together through the main customer flow.
+- Record remaining issues and who will follow up; do not include local secrets
+  or `.env` files in commits.
