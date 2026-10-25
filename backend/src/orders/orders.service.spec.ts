@@ -1,4 +1,4 @@
-import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ValidationPipe,} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -34,11 +34,12 @@ describe('Persistent order creation', () => {
       { id: 'coffee', name: 'Cà phê', price: { toNumber: () => 35000 } },
     ]);
     createOrder.mockImplementation(({ data }: Prisma.OrderCreateArgs) =>
-      Promise.resolve({
-        id: data.id,
-        createdAt: new Date('2026-10-23T12:00:00Z'),
-      }),
-    );
+  Promise.resolve({
+    id: data.id,
+    orderCode: data.orderCode,
+    createdAt: new Date('2026-10-23T12:00:00Z'),
+  }),
+);
     transaction.mockImplementation((run: (client: typeof tx) => unknown) =>
       run(tx),
     );
@@ -59,28 +60,42 @@ describe('Persistent order creation', () => {
       totalAmount: 100000,
       createdAt: '2026-10-23T12:00:00.000Z',
     });
-    expect(createOrder).toHaveBeenCalledWith({
-      data: {
-        id: result.orderCode,
-        status: 'PENDING',
-        total: 100000,
-        subtotal: 100000,
-        discount: 0,
-        promotionCode: null,
-        items: {
-          create: [
+expect(createOrder).toHaveBeenCalledWith({
+  data: {
+    id: result.orderCode,
+    orderCode: result.orderCode,
+    status: 'PENDING',
+    total: 100000,
+    subtotal: 100000,
+    discount: 0,
+    promotionCode: null,
+    items: {
+      create: [
+        {
+          productId: 'coffee',
+          size: 'M',
+          qty: 2,
+          basePrice: 35000,
+          sizeExtraPrice: 5000,
+          toppings: [
             {
-              productId: 'coffee',
-              size: 'M',
-              qty: 2,
-              lineTotal: 100000,
-              snapshot: result.items[0],
+              id: 'cheese',
+              name: 'Kem Cheese',
+              extraPrice: 10000,
             },
           ],
+          unitPrice: 50000,
+          lineTotal: 100000,
+          snapshot: result.items[0],
         },
-      },
-      select: { id: true, createdAt: true },
-    });
+      ],
+    },
+  },
+  select: {
+    orderCode: true,
+    createdAt: true,
+  },
+});
     expect(consume).not.toHaveBeenCalled();
   });
 
@@ -163,13 +178,15 @@ describe('Persistent order creation', () => {
     expect(createOrder).not.toHaveBeenCalled();
   });
 
-  it('rejects an unknown product before opening a write transaction', async () => {
-    findProducts.mockResolvedValue([]);
-    await expect(service.create({ items })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-    expect(transaction).not.toHaveBeenCalled();
-  });
+it('rejects an unknown product before opening a write transaction', async () => {
+  findProducts.mockResolvedValue([]);
+
+  await expect(service.create({ items })).rejects.toBeInstanceOf(
+    NotFoundException,
+  );
+
+  expect(transaction).not.toHaveBeenCalled();
+});
 
   it('rejects a line total that exceeds DECIMAL(12,2)', async () => {
     await expect(

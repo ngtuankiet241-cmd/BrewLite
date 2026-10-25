@@ -95,15 +95,16 @@ export default function CartDrawer({
     removeFromCart,
     clearCart,
   } = useCart();
-  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+  const [currentOrderCode, setCurrentOrderCode] = useState<string | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
   const [promotionCode, setPromotionCode] = useState("");
   const [isValidatingPromotion, setIsValidatingPromotion] = useState(false);
   const [promotionSelection, setPromotionSelection] = useState<{
     cartItems: typeof items;
     quote: PromotionQuote;
   } | null>(null);
-  // Any change to products, options or quantities requires applying the code again.
   const cartKey = JSON.stringify(items);
   const appliedPromotion =
     promotionSelection?.cartItems === items ? promotionSelection.quote : null;
@@ -127,6 +128,7 @@ export default function CartDrawer({
   if (!isOpen) return null;
 
   const handleClearCart = () => {
+    if (currentOrderCode) return;
     clearCart();
     setCheckoutNotice(null);
     setPromotionCode("");
@@ -134,16 +136,23 @@ export default function CartDrawer({
   };
 
   const handleCreateOrder = async () => {
-    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion)
+    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion || currentOrderCode) return;
+
+    const token = localStorage.getItem("brewlite_access_token");
+    if (!token) {
+      setCheckoutNotice("Vui lòng đăng nhập trước khi đặt hàng.");
       return;
+    }
 
     setCheckoutNotice(null);
     setIsSubmittingOrder(true);
-
     try {
       const response = await fetch("http://localhost:3001/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           ...(appliedPromotion ? { promotionCode: appliedPromotion.code } : {}),
           items: items.map((item) => ({
@@ -155,7 +164,6 @@ export default function CartDrawer({
         }),
       });
       const result: unknown = await response.json();
-
       if (!response.ok) {
         const message =
           typeof result === "object" && result !== null && "message" in result
@@ -169,29 +177,17 @@ export default function CartDrawer({
               : `Không thể tạo đơn (HTTP ${response.status}).`,
         );
       }
-
       if (
-        typeof result !== "object" ||
-        result === null ||
-        !("orderCode" in result) ||
-        typeof result.orderCode !== "string" ||
-        !("status" in result) ||
-        result.status !== "PENDING"
+        typeof result !== "object" || result === null ||
+        !("orderCode" in result) || typeof result.orderCode !== "string" ||
+        !("status" in result) || result.status !== "PENDING"
       ) {
         throw new Error("Máy chủ trả về thông tin đơn hàng không hợp lệ.");
       }
-
-      clearCart();
+      setCurrentOrderCode(result.orderCode);
       onOrderCreated();
-      setPromotionCode("");
-      setPromotionSelection(null);
-      setCheckoutNotice(
-        `Tạo đơn thành công: ${result.orderCode} · Trạng thái: ${result.status}.${
-          "totalAmount" in result && typeof result.totalAmount === "number"
-            ? ` Tổng thanh toán: ${formatPriceVND(result.totalAmount)}.`
-            : ""
-        }`,
-      );
+      setCheckoutNotice(`Tạo đơn thành công: ${result.orderCode}. Vui lòng thanh toán.`);
+      // Keep the cart until payment is completed or explicitly handled.
     } catch (error) {
       setCheckoutNotice(
         error instanceof Error
@@ -202,6 +198,73 @@ export default function CartDrawer({
       setIsSubmittingOrder(false);
     }
   };
+
+  const handlePayment = async () => {
+  if (!currentOrderCode || isSubmittingPayment) return;
+
+  setIsSubmittingPayment(true);
+  setCheckoutNotice(null);
+
+  try {
+    const token = localStorage.getItem("brewlite_access_token");
+
+    if (!token) {
+      throw new Error("Vui lòng đăng nhập trước khi thanh toán.");
+    }
+
+    const response = await fetch("http://localhost:3001/payments", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        orderCode: currentOrderCode,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.message || "Không thể khởi tạo thanh toán."
+      );
+    }
+
+    if (
+      !data.checkoutUrl ||
+      !data.formFields ||
+      typeof data.formFields !== "object"
+    ) {
+      throw new Error("Dữ liệu thanh toán từ server không hợp lệ.");
+    }
+
+    // Tạo form POST theo các trường do SDK SePay trả về.
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = data.checkoutUrl;
+
+    for (const [key, value] of Object.entries(data.formFields)) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = key;
+      input.value = String(value ?? "");
+      form.appendChild(input);
+    }
+
+    document.body.appendChild(form);
+    form.submit();
+  } catch (error) {
+    setCheckoutNotice(
+      error instanceof Error
+        ? error.message
+        : "Đã xảy ra lỗi khi khởi tạo thanh toán."
+    );
+    setIsSubmittingPayment(false);
+  }
+};
+
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-center">
@@ -228,7 +291,7 @@ export default function CartDrawer({
             <p className="text-xs text-stone-500">{totalItemsCount} món</p>
           </div>
           <div className="flex items-center gap-2">
-            {items.length > 0 && (
+            {items.length > 0 && !currentOrderCode && (
               <button
                 type="button"
                 onClick={handleClearCart}
@@ -292,7 +355,8 @@ export default function CartDrawer({
                     </div>
                     <button
                       type="button"
-                      onClick={() => removeFromCart(item.cartItemId)}
+                      onClick={() => { if (!currentOrderCode) removeFromCart(item.cartItemId); }}
+                      disabled={Boolean(currentOrderCode)}
                       aria-label={`Xóa ${item.name} khỏi giỏ`}
                       className="shrink-0 rounded-lg p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-700"
                     >
@@ -315,7 +379,7 @@ export default function CartDrawer({
                       cartItemId={item.cartItemId}
                       quantity={item.quantity}
                       name={item.name}
-                      updateQuantity={updateQuantity}
+                      updateQuantity={currentOrderCode ? () => {} : updateQuantity}
                     />
                     <span className="text-sm font-extrabold text-emerald-900">
                       {formatPriceVND(item.price * item.quantity)}
@@ -327,32 +391,32 @@ export default function CartDrawer({
           )}
         </div>
 
-        {checkoutNotice && (
-          <p
-            role="status"
-            className="mx-4 mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900"
-          >
-            {checkoutNotice}
-          </p>
-        )}
+       {checkoutNotice && (
+  <p
+    role="status"
+    className="mx-4 mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900"
+  >
+    {checkoutNotice}
+  </p>
+)}
 
         {items.length > 0 && (
           <footer className="space-y-3 border-t border-stone-200 bg-white/80 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <PromotionInput
-              key={cartKey}
-              code={promotionCode}
-              orderAmount={totalAmount}
-              quote={appliedPromotion}
-              disabled={isSubmittingOrder}
-              onCodeChange={(code) => {
-                setPromotionCode(code);
-                setPromotionSelection(null);
-              }}
-              onApply={(quote) =>
-                setPromotionSelection({ cartItems: items, quote })
-              }
-              onPendingChange={setIsValidatingPromotion}
-            />
+            {!currentOrderCode && (
+              <PromotionInput
+                key={cartKey}
+                code={promotionCode}
+                orderAmount={totalAmount}
+                quote={appliedPromotion}
+                disabled={isSubmittingOrder}
+                onCodeChange={(code) => {
+                  setPromotionCode(code);
+                  setPromotionSelection(null);
+                }}
+                onApply={(quote) => setPromotionSelection({ cartItems: items, quote })}
+                onPendingChange={setIsValidatingPromotion}
+              />
+            )}
             {appliedPromotion && (
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between text-stone-600">
@@ -361,28 +425,39 @@ export default function CartDrawer({
                 </div>
                 <div className="flex justify-between text-emerald-800">
                   <span>Giảm giá ({appliedPromotion.code})</span>
-                  <span>
-                    −{formatPriceVND(appliedPromotion.discountAmount)}
-                  </span>
+                  <span>−{formatPriceVND(appliedPromotion.discountAmount)}</span>
                 </div>
               </div>
             )}
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-stone-600">
-                Tổng thanh toán
-              </span>
+              <span className="text-sm font-semibold text-stone-600">Tổng thanh toán</span>
               <span className="text-lg font-extrabold text-emerald-950">
                 {formatPriceVND(appliedPromotion?.totalAmount ?? totalAmount)}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={handleCreateOrder}
-              disabled={isSubmittingOrder || isValidatingPromotion}
-              className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-emerald-950/15 transition-colors hover:bg-emerald-900 disabled:cursor-wait disabled:opacity-70"
-            >
-              {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}
-            </button>
+            {!currentOrderCode ? (
+              <button
+                type="button"
+                onClick={handleCreateOrder}
+                disabled={isSubmittingOrder || isValidatingPromotion}
+                className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white disabled:opacity-70"
+              >
+                {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}
+              </button>
+            ) : (
+              <div className="space-y-3 rounded-2xl border border-stone-200 p-3">
+                <h3 className="font-bold text-stone-900">Thanh toán đơn hàng</h3>
+                <p className="text-sm">Mã đơn hàng: <strong>{currentOrderCode}</strong></p>
+                <button
+                  type="button"
+                  onClick={handlePayment}
+                  disabled={isSubmittingPayment}
+                  className="w-full rounded-lg bg-amber-600 px-4 py-3 font-semibold text-white disabled:opacity-50"
+                >
+                  {isSubmittingPayment ? "Đang chuyển đến SePay..." : "Thanh toán với SePay Sandbox"}
+                </button>
+              </div>
+            )}
           </footer>
         )}
       </section>

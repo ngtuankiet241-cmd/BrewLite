@@ -18,11 +18,11 @@ describe('Persistent order status transitions', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
-    findOrder.mockResolvedValue({ status: 'PENDING' });
+    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: 'PENDING' });
     updateOrder.mockResolvedValue({ count: 1 });
     service = new OrdersService(
       {
-        order: { findUnique: findOrder, updateMany: updateOrder },
+        order: { findFirst: findOrder, updateMany: updateOrder },
       } as unknown as PrismaService,
       {} as PromotionsService,
     );
@@ -30,7 +30,9 @@ describe('Persistent order status transitions', () => {
 
   it('persists each step from PENDING to COMPLETED', async () => {
     let status = 'PENDING';
-    findOrder.mockImplementation(() => Promise.resolve({ status }));
+    findOrder.mockImplementation(() =>
+      Promise.resolve({ id: orderCode, orderCode, status }),
+    );
     updateOrder.mockImplementation(({ data }: Prisma.OrderUpdateManyArgs) => {
       status = data.status as string;
       return Promise.resolve({ count: 1 });
@@ -57,8 +59,8 @@ describe('Persistent order status transitions', () => {
       expect(status).toBe(nextStatus);
     }
     expect(findOrder).toHaveBeenCalledWith({
-      where: { id: orderCode },
-      select: { status: true },
+      where: { OR: [{ id: orderCode }, { orderCode }] },
+      select: { id: true, status: true, orderCode: true },
     });
   });
 
@@ -69,7 +71,7 @@ describe('Persistent order status transitions', () => {
     ['PAID', 'CANCELLED'],
     ['PAYMENT_FAILED', 'CANCELLED'],
   ])('persists the diagram branch %s -> %s', async (from, to) => {
-    findOrder.mockResolvedValue({ status: from });
+    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: from });
     await expect(service.updateStatus(orderCode, to)).resolves.toEqual({
       orderCode,
       status: to,
@@ -93,7 +95,7 @@ describe('Persistent order status transitions', () => {
     ['COMPLETED', 'CANCELLED'],
     ['CANCELLED', 'PENDING'],
   ])('rejects %s -> %s without writing to the database', async (from, to) => {
-    findOrder.mockResolvedValue({ status: from });
+    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: from });
     await expect(service.updateStatus(orderCode, to)).rejects.toBeInstanceOf(
       BadRequestException,
     );
@@ -101,7 +103,7 @@ describe('Persistent order status transitions', () => {
   });
 
   it('rejects an unrecognized persisted state without writing to the database', async () => {
-    findOrder.mockResolvedValue({ status: 'UNKNOWN' });
+    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: 'UNKNOWN' });
     await expect(
       service.updateStatus(orderCode, 'PAID'),
     ).rejects.toBeInstanceOf(BadRequestException);
