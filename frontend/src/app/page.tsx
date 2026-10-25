@@ -17,6 +17,7 @@ export interface BackendProduct {
   name: string;
   price: number;
   imageUrl: string;
+  stock: number;
 }
 
 /**
@@ -24,7 +25,6 @@ export interface BackendProduct {
  */
 export interface Product extends BackendProduct {
   category: string;
-  stock: number;
   description?: string;
 }
 
@@ -185,7 +185,7 @@ const handleLogout = () => {
 
       const data: BackendProduct[] = await response.json();
 
-      // Bổ sung category theo tên và thiết lập giá trị mặc định cho stock/description
+      // Bổ sung category theo tên và thiết lập giá trị mặc định cho description
       const mappedProducts: Product[] = data.map((item) => {
         const lowerName = item.name.toLowerCase();
 
@@ -213,7 +213,6 @@ const handleLogout = () => {
         return {
           ...item,
           category,
-          stock: (item as unknown as { stock?: number }).stock ?? 20,
           description:
             (item as unknown as { description?: string }).description ??
             defaultDescription,
@@ -261,6 +260,7 @@ const handleLogout = () => {
    * Khởi tạo lại các tùy chọn mặc định (Size Nhỏ, chưa chọn topping nào, số lượng = 1)
    */
   const handleOpenDetailModal = (product: Product) => {
+    if (product.stock <= 0) return;
     setSelectedProduct(product);
     setSelectedSize(SIZE_OPTIONS[0]);
     setSelectedToppings([]);
@@ -289,7 +289,7 @@ const handleLogout = () => {
    */
   const handleIncreaseQuantity = () => {
     if (!selectedProduct) return;
-    const maxStock = selectedProduct.stock || 99;
+    const maxStock = selectedProduct.stock;
     const nextQuantity = Math.min(maxStock, quantity + 1);
     setQuantity(nextQuantity);
     setQuantityInput(String(nextQuantity));
@@ -301,15 +301,16 @@ const handleLogout = () => {
 
     const parsedQuantity = Number(value);
     if (Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0) {
-      setQuantity(Math.min(selectedProduct.stock || 99, parsedQuantity));
+      setQuantity(Math.min(selectedProduct.stock, parsedQuantity));
     }
   };
 
   const handleQuantityInputBlur = () => {
+    if (!selectedProduct) return;
     const parsedQuantity = Number(quantityInput);
     const normalizedQuantity =
       Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0
-        ? Math.min(selectedProduct?.stock || 99, parsedQuantity)
+        ? Math.min(selectedProduct.stock, parsedQuantity)
         : quantity;
     setQuantity(normalizedQuantity);
     setQuantityInput(String(normalizedQuantity));
@@ -354,18 +355,18 @@ const handleLogout = () => {
    * Xử lý khi nhấn nút "Thêm vào giỏ" trong Modal:
    * Cập nhật đúng số lượng & tổng tiền, mở Modal Popup Thông Báo Thành Công
    */
-const handleAddToCart = () => {
-  if (!authUser || !localStorage.getItem("brewlite_access_token")) {
-    setIsAuthOpen(true);
-    return;
-  }
+  const handleAddToCart = () => {
+    if (!authUser || !localStorage.getItem("brewlite_access_token")) {
+      setIsAuthOpen(true);
+      return;
+    }
 
-  if (!selectedProduct) return;
+    if (!selectedProduct || selectedProduct.stock <= 0) return;
 
     const parsedQuantity = Number(quantityInput);
     const quantityToAdd =
       Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0
-        ? Math.min(selectedProduct.stock || 99, parsedQuantity)
+        ? Math.min(selectedProduct.stock, parsedQuantity)
         : quantity;
     setQuantity(quantityToAdd);
     setQuantityInput(String(quantityToAdd));
@@ -799,7 +800,7 @@ const handleAddToCart = () => {
                         />
                         {/* Tag số lượng có sẵn */}
                         <span className="absolute top-2 right-2 bg-black/45 backdrop-blur-md text-white text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/10 shadow-xs">
-                          Còn {product.stock}
+                          {product.stock > 0 ? `Còn ${product.stock}` : "Hết hàng"}
                         </span>
                       </div>
 
@@ -899,6 +900,7 @@ const handleAddToCart = () => {
         <CartDrawer
           isOpen={isCartOpen}
           onClose={() => setIsCartOpen(false)}
+          onOrderCreated={fetchProducts}
         />
 
         {/* ------------------------------------------------------------------ */}

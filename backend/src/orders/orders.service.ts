@@ -1,17 +1,20 @@
-
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
+import { PromotionsService } from '../promotions/promotions.service.js';
+import { assertTransition } from './order-state-machine.js';
 import {
   Order,
   OrderItem,
   OrderSizeId,
+  OrderStatus,
   OrderToppingId,
 } from './order.types.js';
 
@@ -22,65 +25,65 @@ const SIZES = {
 } satisfies Record<OrderSizeId, { name: string; extraPrice: number }>;
 
 const TOPPINGS = {
-  [OrderToppingId.WhitePearl]: {
-    name: 'Trân châu trắng',
-    extraPrice: 10000,
-  },
-  [OrderToppingId.AloeVera]: {
-    name: 'Thạch nha đam',
-    extraPrice: 10000,
-  },
-  [OrderToppingId.Cheese]: {
-    name: 'Kem Cheese',
-    extraPrice: 10000,
-  },
+  [OrderToppingId.WhitePearl]: { name: 'Trân châu trắng', extraPrice: 10000 },
+  [OrderToppingId.AloeVera]: { name: 'Thạch nha đam', extraPrice: 10000 },
+  [OrderToppingId.Cheese]: { name: 'Kem Cheese', extraPrice: 10000 },
 } satisfies Record<OrderToppingId, { name: string; extraPrice: number }>;
+
+const MAX_ORDER_AMOUNT = 9_999_999_999;
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly promotions: PromotionsService,
+  ) {}
 
-  async create(dto: CreateOrderDto, userId: string): Promise<Order> {
-    const productIds = [
-      ...new Set(dto.items.map((item) => item.productId)),
-    ];
+  async updateStatus(
+    orderCode: string,
+    nextStatus: OrderStatus,
+  ): Promise<Pick<Order, 'orderCode' | 'status'>> {
+    const order = await this.prisma.order.findFirst({
+      where: { OR: [{ id: orderCode }, { orderCode }] },
+      select: { id: true, status: true, orderCode: true },
+    });
+    if (!order) {
+      throw new NotFoundException('Không tìm thấy đơn hàng.');
+    }
 
+    assertTransition(order.status, nextStatus);
+    const result = await this.prisma.order.updateMany({
+      where: { id: order.id, status: order.status },
+      data: { status: nextStatus },
+    });
+    if (result.count !== 1) {
+      throw new ConflictException('Trạng thái đơn hàng đã thay đổi. Vui lòng thử lại.');
+    }
+    return { orderCode: order.orderCode, status: nextStatus };
+  }
+
+  async create(dto: CreateOrderDto, userId?: string): Promise<Order> {
+    const productIds = [...new Set(dto.items.map((item) => item.productId))];
     const products = await this.prisma.product.findMany({
       where: { id: { in: productIds } },
       select: { id: true, name: true, price: true },
     });
-
-    const productsById = new Map(
-      products.map((product) => [product.id, product]),
-    );
+    const productsById = new Map(products.map((product) => [product.id, product]));
 
     const items: OrderItem[] = dto.items.map((item) => {
       const product = productsById.get(item.productId);
-
       if (!product) {
-        throw new NotFoundException(
-          `Sản phẩm không tồn tại: ${item.productId}`,
-        );
+        throw new NotFoundException(`Sản phẩm không tồn tại: ${item.productId}`);
       }
-
       const size = { id: item.sizeId, ...SIZES[item.sizeId] };
-      const toppings = item.toppingIds.map((id) => ({
-        id,
-        ...TOPPINGS[id],
-      }));
-
+      const toppings = item.toppingIds.map((id) => ({ id, ...TOPPINGS[id] }));
       const basePrice = product.price.toNumber();
-      const unitPrice =
-        basePrice +
-        size.extraPrice +
+      const unitPrice = basePrice + size.extraPrice +
         toppings.reduce((sum, topping) => sum + topping.extraPrice, 0);
-
       const lineTotal = unitPrice * item.quantity;
-
-      if (!Number.isSafeInteger(lineTotal)) {
-        throw new BadRequestException('Tổng tiền sản phẩm không hợp lệ.');
+      if (!Number.isSafeInteger(lineTotal) || lineTotal > MAX_ORDER_AMOUNT) {
+        throw new BadRequestException('Tổng tiền sản phẩm vượt giới hạn hợp lệ.');
       }
-
       return {
         productId: product.id,
         productName: product.name,
@@ -93,92 +96,92 @@ export class OrdersService {
       };
     });
 
-    const totalAmount = items.reduce(
-      (sum, item) => sum + item.lineTotal,
-      0,
-    );
+    const totalAmount = items.reduce((sum, item) => sum + item.lineTotal, 0);
+    if (!Number.isSafeInteger(totalAmount) || totalAmount > MAX_ORDER_AMOUNT) {
+      throw new BadRequestException('Tổng tiền đơn hàng vượt giới hạn hợp lệ.');
+    }
 
-    if (!Number.isSafeInteger(totalAmount)) {
-      throw new BadRequestException('Tổng tiền đơn hàng không hợp lệ.');
+    const quantitiesByProduct = new Map<string, number>();
+    for (const item of items) {
+      const quantity = (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity;
+      if (!Number.isSafeInteger(quantity) || quantity > 2_147_483_647) {
+        throw new BadRequestException(`Sản phẩm không đủ tồn kho: ${item.productName}`);
+      }
+      quantitiesByProduct.set(item.productId, quantity);
     }
 
     const orderCode = `ORD-${randomUUID()}`;
+    return this.prisma.$transaction(async (tx) => {
+      for (const [productId, quantity] of quantitiesByProduct) {
+        const result = await tx.product.updateMany({
+          where: { id: productId, stock: { gte: quantity } },
+          data: { stock: { decrement: quantity } },
+        });
+        if (result.count !== 1) {
+          throw new BadRequestException(
+            `Sản phẩm không đủ tồn kho: ${productsById.get(productId)!.name}`,
+          );
+        }
+      }
 
-    const savedOrder = await this.prisma.order.create({
-      data: {
-        orderCode,
-        userId,
-        status: 'PENDING',
-        total: totalAmount,
-        items: {
-          create: items.map((item) => ({
-            productId: item.productId,
-            size: item.size.id,
-            qty: item.quantity,
-            lineTotal: item.lineTotal,
-            basePrice: item.basePrice,
-            unitPrice: item.unitPrice,
-            sizeExtraPrice: item.size.extraPrice,
-            toppings: item.toppings as unknown as Prisma.InputJsonValue,
-          })),
-        },
-      },
-      include: {
-        items: {
-          include: {
-            product: { select: { name: true } },
+      const promotion = dto.promotionCode !== undefined
+        ? await this.promotions.consume(dto.promotionCode, totalAmount, tx)
+        : null;
+      const payableAmount = promotion?.totalAmount ?? totalAmount;
+
+      const saved = await tx.order.create({
+        data: {
+          id: orderCode,
+          orderCode,
+          ...(userId ? { userId } : {}),
+          status: 'PENDING',
+          subtotal: totalAmount,
+          discount: promotion?.discountAmount ?? 0,
+          promotionCode: promotion?.code ?? null,
+          total: payableAmount,
+          items: {
+            create: items.map((item) => ({
+              productId: item.productId,
+              size: item.size.id,
+              qty: item.quantity,
+              lineTotal: item.lineTotal,
+              basePrice: item.basePrice,
+              unitPrice: item.unitPrice,
+              sizeExtraPrice: item.size.extraPrice,
+              toppings: item.toppings as unknown as Prisma.InputJsonValue,
+              snapshot: {
+                ...item,
+                size: { ...item.size },
+                toppings: item.toppings.map((topping) => ({ ...topping })),
+              } as Prisma.InputJsonValue,
+            })),
           },
         },
-      },
+        select: { orderCode: true, createdAt: true },
+      });
+
+      return {
+        orderCode: saved.orderCode,
+        status: 'PENDING',
+        items,
+        totalAmount: payableAmount,
+        ...(promotion ? {
+          subtotalAmount: totalAmount,
+          discountAmount: promotion.discountAmount,
+          promotionCode: promotion.code,
+        } : {}),
+        createdAt: saved.createdAt.toISOString(),
+      } satisfies Order;
     });
-
-    return {
-      orderCode: savedOrder.orderCode,
-      status: 'PENDING',
-      totalAmount: savedOrder.total.toNumber(),
-      createdAt: savedOrder.createdAt.toISOString(),
-      items: savedOrder.items.map((savedItem) => {
-        const sizeId = savedItem.size as OrderSizeId;
-        const size = {
-          id: sizeId,
-          ...SIZES[sizeId],
-        };
-
-        const toppings = savedItem.toppings as unknown as OrderItem['toppings'];
-
-        return {
-          productId: savedItem.productId,
-          productName: savedItem.product.name,
-          basePrice: savedItem.basePrice.toNumber(),
-          quantity: savedItem.qty,
-          size,
-          toppings,
-          unitPrice: savedItem.unitPrice.toNumber(),
-          lineTotal: savedItem.lineTotal.toNumber(),
-        };
-      }),
-    };
   }
-  
-  // Lấy lịch sử đặt hàng của người dùng đang đăng nhập
+
+  // Lấy lịch sử đơn hàng của tài khoản đang đăng nhập.
   async getHistory(userId: string) {
     const orders = await this.prisma.order.findMany({
-      where: {
-        userId,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
       include: {
-        items: {
-          include: {
-            product: {
-              select: {
-                name: true,
-              },
-            },
-          },
-        },
+        items: { include: { product: { select: { name: true } } } },
       },
     });
 
@@ -186,29 +189,36 @@ export class OrdersService {
       orderCode: order.orderCode,
       status: order.status,
       totalAmount: order.total.toNumber(),
+      subtotalAmount: order.subtotal?.toNumber(),
+      discountAmount: order.discount.toNumber(),
+      promotionCode: order.promotionCode ?? undefined,
       createdAt: order.createdAt.toISOString(),
-
       items: order.items.map((item) => {
+        const snapshot = item.snapshot as unknown as Partial<OrderItem> | null;
+        if (snapshot && typeof snapshot === 'object' && snapshot.size && snapshot.toppings) {
+          return {
+            productId: item.productId,
+            productName: snapshot.productName ?? item.product.name,
+            basePrice: snapshot.basePrice ?? item.basePrice.toNumber(),
+            quantity: item.qty,
+            size: snapshot.size,
+            toppings: snapshot.toppings,
+            unitPrice: snapshot.unitPrice ?? item.unitPrice.toNumber(),
+            lineTotal: item.lineTotal.toNumber(),
+          };
+        }
         const sizeId = item.size as OrderSizeId;
-
-        const toppings =
-          item.toppings as unknown as OrderItem['toppings'];
-
         return {
           productId: item.productId,
           productName: item.product.name,
           basePrice: item.basePrice.toNumber(),
           quantity: item.qty,
-          size: {
-            id: sizeId,
-            ...SIZES[sizeId],
-          },
-          toppings,
+          size: { id: sizeId, ...SIZES[sizeId] },
+          toppings: item.toppings as unknown as OrderItem['toppings'],
           unitPrice: item.unitPrice.toNumber(),
           lineTotal: item.lineTotal.toNumber(),
         };
       }),
     }));
   }
-
 }

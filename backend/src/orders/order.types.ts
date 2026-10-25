@@ -1,38 +1,49 @@
-  export enum OrderSizeId {
-    Small = 'S',
-    Medium = 'M',
-    Large = 'L',
-  }
 
-  export enum OrderToppingId {
-    WhitePearl = 'white_pearl',
-    AloeVera = 'aloe_vera',
-    Cheese = 'cheese',
-  }
+export enum OrderSizeId {
+  Small = 'S',
+  Medium = 'M',
+  Large = 'L',
+}
 
-  export type OrderStatus = 'PENDING';
+export enum OrderToppingId {
+  WhitePearl = 'white_pearl',
+  AloeVera = 'aloe_vera',
+  Cheese = 'cheese',
+}
 
-  export interface OrderOption {
-    id: string;
-    name: string;
-    extraPrice: number;
-  }
+export type OrderStatus =
+  | 'PENDING'
+  | 'PAID'
+  | 'PREPARING'
+  | 'READY'
+  | 'COMPLETED'
+  | 'PAYMENT_FAILED'
+  | 'CANCELLED';
 
-  export interface OrderItem {
-    productId: string;
-    productName: string;
-    basePrice: number;
-    quantity: number;
-    size: OrderOption;
-    toppings: OrderOption[];
-    unitPrice: number;
-    lineTotal: number;
-  }
+export interface OrderOption {
+  id: string;
+  name: string;
+  extraPrice: number;
+}
 
-  export interface Order {
-    orderCode: string;
-    status: OrderStatus;
-    items: OrderItem[];
-    totalAmount: number;
-    createdAt: string;
-  }
+export interface OrderItem {
+  productId: string;
+  productName: string;
+  basePrice: number;
+  quantity: number;
+  size: OrderOption;
+  toppings: OrderOption[];
+  unitPrice: number;
+  lineTotal: number;
+}
+
+export interface Order {
+  orderCode: string;
+  status: OrderStatus;
+  items: OrderItem[];
+  totalAmount: number;
+  subtotalAmount?: number;
+  discountAmount?: number;
+  promotionCode?: string;
+  createdAt: string;
+}

@@ -5,11 +5,13 @@ import { join } from 'node:path';
 
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+
 import { OrdersModule } from './orders/orders.module.js';
 import { ProductsModule } from './products/products.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
+import { PromotionsModule } from './promotions/promotions.module.js';
 
 @Module({
   imports: [
@@ -22,6 +24,7 @@ import { PaymentsModule } from './payments/payments.module.js';
     PrismaModule,
     AuthModule,
     PaymentsModule,
+    PromotionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

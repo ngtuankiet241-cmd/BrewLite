@@ -15,6 +15,7 @@ payment, and viewing confirmation.
 ## Requirements
 
 - Node.js LTS and npm
+- PostgreSQL, with a database configured in `backend/.env`
 - Git
 - Windows PowerShell users may need `npm.cmd` instead of `npm`
 
@@ -23,6 +24,17 @@ Install dependencies once from the repository root:
 ```powershell
 npm.cmd --prefix backend ci
 npm.cmd --prefix frontend ci
+```
+
+Configure `DATABASE_URL` in `backend/.env`, then apply migrations and generate
+the Prisma client from the backend directory:
+
+```powershell
+cd backend
+npx.cmd prisma migrate deploy
+npx.cmd prisma generate
+npx.cmd prisma db seed
+cd ..
 ```
 
 ## Run locally
@@ -50,16 +62,19 @@ frontend.
 
 ## Current API
 
-`GET /products` returns an in-memory sample menu. A product currently contains:
-`id`, `name`, `price` (integer VND), and `imageUrl`. It does not yet return
-category, stock, or description. See [the API contract and open decisions](docs/api-contracts.md).
+`GET /products` returns products from the database. A product currently contains:
+`id`, `name`, `price` (integer VND), `imageUrl`, and `stock` (inventory quantity).
+It does not yet return category or description. See [the API contract and open decisions](docs/api-contracts.md).
 
-The backend enables CORS for local frontend requests. The sample product list
-is not persisted in a database. `POST /orders` creates a validated `PENDING`
-order in backend memory; orders are lost when the backend restarts. The frontend
-cart submits to this endpoint and keeps the cart if order creation fails.
-Database persistence, authentication, and payment remain later tasks. Payments
-in this project are simulated and must not use real payment credentials.
+The backend enables CORS for local frontend requests. `POST /orders` creates a
+validated `PENDING` order in PostgreSQL, including item and price snapshots.
+The order, its items, stock deductions and any promotion usage are saved in one
+transaction, and orders survive backend restarts. Insufficient stock rejects the
+order; successful checkout reloads the menu inventory. The frontend cart keeps
+its contents if order creation fails. Checkout currently supports guests;
+associating a logged-in user and processing payment remain separate tasks.
+Payments in this project are
+simulated and must not use real payment credentials.
 
 ## Checks
 
@@ -68,21 +83,25 @@ Run from the repository root:
 ```powershell
 npm.cmd --prefix backend run build
 npm.cmd --prefix backend run lint
+npm.cmd --prefix backend test
 npm.cmd --prefix backend run test:e2e
 npm.cmd --prefix frontend run lint
 npm.cmd --prefix frontend run build
 ```
 
-The backend e2e suite covers the product list and order creation. See
+The backend e2e suite requires the configured PostgreSQL database with migrations
+applied and menu data seeded. It covers the product list, order creation,
+persistence after closing the app, stock deduction, insufficient stock, transaction
+rollback and concurrent promotion checkout. The persistence tests create unique
+fixtures and remove them after testing. See
 [the API contract](docs/api-contracts.md) for the order payload and validation
 rules.
 
 ## Environment variables
 
-No environment file is currently required to run the sample menu. `.env.example`
-contains placeholders for future configuration. Copy values only when the
-relevant feature needs them; never commit `.env` files, passwords, JWT secrets,
-or payment credentials.
+Set `DATABASE_URL` in `backend/.env` for PostgreSQL and `JWT_SECRET` for login.
+`.env.example` contains configuration placeholders. Never commit `.env` files,
+passwords, JWT secrets, or payment credentials.
 
 ## Team workflow
 
