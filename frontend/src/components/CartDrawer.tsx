@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import PromotionInput, { type PromotionQuote } from "./PromotionInput";
 import { API_URL, fetchAccount, type Account } from "../lib/account";
+import { checkoutKey } from "../lib/checkout";
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -179,22 +180,24 @@ export default function CartDrawer({
     setCheckoutNotice(null);
     setIsSubmittingOrder(true);
     try {
+      const body = JSON.stringify({
+        ...(appliedPromotion ? { promotionCode: appliedPromotion.code } : {}),
+        pointsToRedeem,
+        items: items.map((item) => ({
+          productId: item.id,
+          quantity: item.quantity,
+          sizeId: item.size.id,
+          toppingIds: item.toppings.map((topping) => topping.id),
+        })),
+      });
       const response = await fetch(`${API_URL}/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Idempotency-Key": checkoutKey("order", JSON.stringify([cartKey, body])),
         },
-        body: JSON.stringify({
-          ...(appliedPromotion ? { promotionCode: appliedPromotion.code } : {}),
-          pointsToRedeem,
-          items: items.map((item) => ({
-            productId: item.id,
-            quantity: item.quantity,
-            sizeId: item.size.id,
-            toppingIds: item.toppings.map((topping) => topping.id),
-          })),
-        }),
+        body,
       });
       const result: unknown = await response.json();
       if (!response.ok) {
@@ -257,7 +260,7 @@ export default function CartDrawer({
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
-        "Idempotency-Key": crypto.randomUUID(),
+        "Idempotency-Key": checkoutKey("payment", currentOrderCode),
       },
       body: JSON.stringify({
         orderCode: currentOrderCode,

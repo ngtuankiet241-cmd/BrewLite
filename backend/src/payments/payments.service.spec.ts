@@ -8,6 +8,12 @@ describe('SePay checkout signature', () => {
   it('signs and returns fields in the order specified by the checkout API', async () => {
     const merchantSecret = 'test-only-merchant-secret';
     const tx = {
+      $executeRaw: vi.fn(),
+      $queryRaw: vi.fn(),
+      idempotencyRequest: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
       order: {
         findFirst: vi.fn().mockResolvedValue({
           id: 'order-test',

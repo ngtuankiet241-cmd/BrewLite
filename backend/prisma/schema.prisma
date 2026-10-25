@@ -24,6 +24,20 @@ model User {
   passwordHash  String
   loyaltyPoints Int     @default(0)
   orders        Order[]
+  idempotencyRequests IdempotencyRequest[]
+}
+
+model IdempotencyRequest {
+  userId      String
+  operation   String
+  key         String   @db.VarChar(200)
+  requestHash String   @db.Char(64)
+  response    String   @db.Text
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, operation, key])
 }
 
 model Order {

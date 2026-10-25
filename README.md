@@ -66,13 +66,14 @@ frontend.
 `id`, `name`, `price` (integer VND), `imageUrl`, and `stock` (inventory quantity).
 It does not yet return category or description. See [the API contract and open decisions](docs/api-contracts.md).
 
-The backend enables CORS for local frontend requests. `POST /orders` creates a
-validated `PENDING` order in PostgreSQL, including item and price snapshots.
+The backend enables CORS for local frontend requests. `POST /orders` requires
+login and creates a validated order in PostgreSQL, including item and price snapshots.
 The order, its items, stock deductions and any promotion usage are saved in one
 transaction, and orders survive backend restarts. Insufficient stock rejects the
 order; successful checkout reloads the menu inventory. The frontend cart keeps
-its contents if order creation fails. Checkout currently supports guests;
-associating a logged-in user and processing payment remain separate tasks.
+its contents if order creation fails. Both order creation and SePay payment
+initialization support `Idempotency-Key`; retries reuse the original result.
+See [idempotency rules and tests](docs/idempotency.md) for the API rules.
 Payments in this project are
 simulated and must not use real payment credentials.
 
@@ -92,7 +93,8 @@ npm.cmd --prefix frontend run build
 The backend e2e suite requires the configured PostgreSQL database with migrations
 applied and menu data seeded. It covers the product list, order creation,
 persistence after closing the app, stock deduction, insufficient stock, transaction
-rollback and concurrent promotion checkout. The persistence tests create unique
+rollback, two sequential requests with the same idempotency key,
+duplicate payment callbacks and concurrent promotion checkout. The persistence tests create unique
 fixtures and remove them after testing. See
 [the API contract](docs/api-contracts.md) for the order payload and validation
 rules.
