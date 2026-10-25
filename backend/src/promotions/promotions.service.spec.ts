@@ -34,7 +34,13 @@ describe('Promotions and discounted orders', () => {
     findUnique.mockImplementation(() => Promise.resolve({ ...promotion }));
     updateMany.mockResolvedValue({ count: 1 });
     findProducts.mockResolvedValue([
-      { id: 'coffee', name: 'Cà phê', price: { toNumber: () => 35000 } },
+      {
+        id: 'coffee',
+        name: 'Cà phê',
+        price: { toNumber: () => 35000 },
+        stock: 100,
+        stockVersion: 0,
+      },
     ]);
     const prisma = {
       promotion: { findUnique, updateMany },

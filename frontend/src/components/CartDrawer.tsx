@@ -6,8 +6,10 @@ import { useCart } from "../context/CartContext";
 import PromotionInput, { type PromotionQuote } from "./PromotionInput";
 import { API_URL, fetchAccount, type Account } from "../lib/account";
 import { checkoutKey } from "../lib/checkout";
+import { getQuantityError } from "../lib/inventory";
 
 interface CartDrawerProps {
+  products: ReadonlyArray<{ id: string; stock: number }>;
   isOpen: boolean;
   onClose: () => void;
   onOrderCreated: () => void;
@@ -23,69 +25,92 @@ function CartQuantityControl({
   cartItemId,
   quantity,
   name,
-  updateQuantity,
+  quantityInput,
+  maxQuantity,
+  disabled,
+  onInputChange,
+  onRemove,
 }: {
   cartItemId: string;
   quantity: number;
   name: string;
-  updateQuantity: (cartItemId: string, quantity: number) => void;
+  quantityInput: string;
+  maxQuantity: number;
+  disabled: boolean;
+  onInputChange: (value: string) => void;
+  onRemove: () => void;
 }) {
-  const [quantityInput, setQuantityInput] = useState(String(quantity));
+  const quantityError = getQuantityError(quantityInput, maxQuantity);
 
   const update = (nextQuantity: number) => {
-    updateQuantity(cartItemId, nextQuantity);
-    setQuantityInput(String(nextQuantity));
+    if (disabled) return;
+    if (nextQuantity === 0) onRemove();
+    else onInputChange(String(nextQuantity));
   };
 
   const handleInputChange = (value: string) => {
-    setQuantityInput(value);
-    if (!/^\d+$/.test(value)) return;
-
-    const parsedQuantity = Number(value);
-    if (Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0) {
-      updateQuantity(cartItemId, parsedQuantity);
-    }
-  };
-
-  const handleInputBlur = () => {
-    const parsedQuantity = Number(quantityInput);
-    if (!Number.isSafeInteger(parsedQuantity) || parsedQuantity < 1) {
-      setQuantityInput(String(quantity));
-    }
+    if (disabled) return;
+    onInputChange(value);
   };
 
   return (
-    <div className="flex items-center gap-2 rounded-xl bg-stone-100 p-1">
-      <button
-        type="button"
-        onClick={() => update(Math.max(0, quantity - 1))}
-        aria-label={`Giảm số lượng ${name}`}
-        className="flex h-7 w-7 items-center justify-center rounded-lg bg-white font-bold text-stone-800"
-      >
-        −
-      </button>
-      <input
-        type="text"
-        inputMode="numeric"
-        aria-label={`Nhập số lượng ${name}`}
-        value={quantityInput}
-        onChange={(event) => handleInputChange(event.target.value)}
-        onBlur={handleInputBlur}
-        className="h-7 w-12 rounded-lg border border-stone-200 bg-white text-center text-sm font-bold text-stone-900 outline-none focus:border-emerald-700"
-      />
-      <button
-        type="button"
-        onClick={() => update(quantity + 1)}
-        aria-label={`Tăng số lượng ${name}`}
-        className="flex h-7 w-7 items-center justify-center rounded-lg bg-white font-bold text-stone-800"
-      >
-        +
-      </button>
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 rounded-xl bg-stone-100 p-1">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            update(Math.max(0, (Number(quantityInput) || quantity) - 1))
+          }
+          aria-label={`Giảm số lượng ${name}`}
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white font-bold text-stone-800"
+        >
+          −
+        </button>
+        <input
+          type="text"
+          inputMode="numeric"
+          aria-label={`Nhập số lượng ${name}`}
+          disabled={disabled}
+          aria-invalid={!disabled && Boolean(quantityError)}
+          aria-describedby={
+            !disabled && quantityError
+              ? `quantity-error-${cartItemId}`
+              : undefined
+          }
+          value={quantityInput}
+          onChange={(event) => handleInputChange(event.target.value)}
+          className="h-7 w-12 rounded-lg border border-stone-200 bg-white text-center text-sm font-bold text-stone-900 outline-none focus:border-emerald-700"
+        />
+        <button
+          type="button"
+          disabled={
+            disabled ||
+            Boolean(quantityError) ||
+            Number(quantityInput) >= maxQuantity
+          }
+          onClick={() => update(quantity + 1)}
+          aria-label={`Tăng số lượng ${name}`}
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white font-bold text-stone-800 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          +
+        </button>
+      </div>
+      {!disabled && quantityError && (
+        <p
+          id={`quantity-error-${cartItemId}`}
+          role="alert"
+          className="max-w-44 text-xs text-rose-700"
+        >
+          {quantityError}
+        </p>
+      )}
     </div>
   );
 }
 
 export default function CartDrawer({
+  products,
   isOpen,
   onClose,
   onOrderCreated,
@@ -102,6 +127,7 @@ export default function CartDrawer({
   const [currentOrderCode, setCurrentOrderCode] = useState<string | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [quantityInputs, setQuantityInputs] = useState<Record<string, { quantity: number; value: string }>>({});
   const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [pointsError, setPointsError] = useState<string | null>(null);
@@ -126,6 +152,20 @@ export default function CartDrawer({
   const invalidPoints = !currentOrderCode && pointsToRedeem > maxPoints;
   const pointsDiscount = pointsToRedeem * pointValue;
   const payableAmount = confirmedTotal ?? Math.max(0, afterPromotion - pointsDiscount);
+  const stockByProduct = new Map(products.map((product) => [product.id, product.stock]));
+  const quantitiesByProduct = new Map<string, number>();
+  for (const item of items) {
+    quantitiesByProduct.set(item.id, (quantitiesByProduct.get(item.id) ?? 0) + item.quantity);
+  }
+  const maxQuantityFor = (item: typeof items[number]) =>
+    Math.max(0, (stockByProduct.get(item.id) ?? 0) - ((quantitiesByProduct.get(item.id) ?? 0) - item.quantity));
+  const quantityInputFor = (item: typeof items[number]) => {
+    const draft = quantityInputs[item.cartItemId];
+    return draft?.quantity === item.quantity ? draft.value : String(item.quantity);
+  };
+  const invalidQuantities = items.some((item) =>
+    Boolean(getQuantityError(quantityInputFor(item), maxQuantityFor(item))),
+  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -169,7 +209,7 @@ export default function CartDrawer({
   };
 
   const handleCreateOrder = async () => {
-    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion || currentOrderCode || invalidPoints) return;
+    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion || currentOrderCode || invalidPoints || invalidQuantities) return;
 
     const token = localStorage.getItem("brewlite_access_token");
     if (!token) {
@@ -422,7 +462,16 @@ export default function CartDrawer({
                       cartItemId={item.cartItemId}
                       quantity={item.quantity}
                       name={item.name}
-                      updateQuantity={currentOrderCode ? () => {} : updateQuantity}
+                      quantityInput={quantityInputFor(item)}
+                      maxQuantity={maxQuantityFor(item)}
+                      disabled={Boolean(currentOrderCode) || isSubmittingOrder}
+                      onInputChange={(value) => {
+                        const invalid = Boolean(getQuantityError(value, maxQuantityFor(item)));
+                        const nextQuantity = invalid ? item.quantity : Number(value);
+                        setQuantityInputs((current) => ({ ...current, [item.cartItemId]: { quantity: nextQuantity, value } }));
+                        if (!invalid) updateQuantity(item.cartItemId, nextQuantity);
+                      }}
+                      onRemove={() => removeFromCart(item.cartItemId)}
                     />
                     <span className="text-sm font-extrabold text-emerald-900">
                       {formatPriceVND(item.price * item.quantity)}
@@ -514,14 +563,21 @@ export default function CartDrawer({
             </div>
             {account && <p className="text-xs text-stone-500">Nhận {Math.floor(payableAmount / account.loyaltyPolicy.spendPerPoint).toLocaleString("vi-VN")} điểm sau khi thanh toán thành công.</p>}
             {!currentOrderCode ? (
-              <button
-                type="button"
-                onClick={handleCreateOrder}
-                disabled={isSubmittingOrder || isValidatingPromotion || invalidPoints}
-                className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white disabled:opacity-70"
-              >
-                {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}
-              </button>
+              <>
+                {invalidQuantities && (
+                  <p role="alert" className="text-xs text-rose-700">
+                    Vui lòng sửa số lượng vượt tồn kho hoặc không hợp lệ trước khi đặt hàng.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCreateOrder}
+                  disabled={isSubmittingOrder || isValidatingPromotion || invalidPoints || invalidQuantities}
+                  className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white disabled:opacity-70"
+                >
+                  {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}
+                </button>
+              </>
             ) : (
               <div className="space-y-3 rounded-2xl border border-stone-200 p-3">
                 <h3 className="font-bold text-stone-900">Thanh toán đơn hàng</h3>
