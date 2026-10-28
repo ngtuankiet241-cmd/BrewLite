@@ -1,33 +1,30 @@
 # BrewLite
 
-BrewLite is a cashless drink-ordering application built for the Software
-Engineering course project. The MVP is being developed in small increments:
-browsing drinks, choosing options, managing a cart, placing an order, simulating
-payment, and viewing confirmation.
+BrewLite là ứng dụng đặt đồ uống trực tuyến không dùng tiền mặt (cashless drink-ordering), được xây dựng phục vụ đồ án môn Công nghệ Phần mềm. Phiên bản MVP được phát triển theo từng bước: xem thực đơn, chọn tùy chọn (size/topping), quản lý giỏ hàng, tạo đơn hàng, mô phỏng thanh toán và xem trang xác nhận đơn.
 
-## Project structure
+## Cấu trúc dự án
 
-- `frontend/` - Next.js and TypeScript web application
-- `backend/` - NestJS and TypeScript REST API
-- `docs/api-contracts.md` - confirmed API details and decisions still needed
-- `BrewLite-Tien-do.xlsx` - team backlog and progress tracker
+- `frontend/` - Ứng dụng web xây dựng bằng Next.js và TypeScript
+- `backend/` - REST API xây dựng bằng NestJS và TypeScript
+- `docs/api-contracts.md` - Chi tiết hợp đồng API đã thống nhất và các quyết định kỹ thuật
+- `BrewLite-Tien-do.xlsx` - Bảng theo dõi tiến độ và backlog của nhóm
+- `docker-compose.yml` - Cấu hình chạy toàn bộ hệ thống bằng Docker Compose
 
-## Requirements
+## Yêu cầu môi trường
 
-- Node.js LTS and npm
-- PostgreSQL, with a database configured in `backend/.env`
+- Node.js LTS và npm
+- PostgreSQL, cấu hình kết nối CSDL trong file `backend/.env`
 - Git
-- Windows PowerShell users may need `npm.cmd` instead of `npm`
+- Người dùng Windows PowerShell có thể dùng `npm.cmd` thay cho `npm`
 
-Install dependencies once from the repository root:
+Cài đặt các gói thư viện phụ thuộc một lần từ thư mục gốc của dự án:
 
 ```powershell
 npm.cmd --prefix backend ci
 npm.cmd --prefix frontend ci
 ```
 
-Configure `DATABASE_URL` in `backend/.env`, then apply migrations and generate
-the Prisma client from the backend directory:
+Cấu hình `DATABASE_URL` trong file `backend/.env`, sau đó chạy migration và sinh Prisma client từ thư mục `backend`:
 
 ```powershell
 cd backend
@@ -37,48 +34,47 @@ npx.cmd prisma db seed
 cd ..
 ```
 
-## Run locally
+## Khởi chạy cục bộ (Local)
 
-Run the backend and frontend in separate PowerShell terminals from the
-repository root.
+Chạy backend và frontend trong hai cửa sổ terminal PowerShell riêng biệt từ thư mục gốc của dự án.
 
-Terminal 1 - backend:
+Terminal 1 - Backend:
 
 ```powershell
 npm.cmd --prefix backend run start:dev
 ```
 
-The API listens at `http://localhost:3001`.
+API sẽ lắng nghe tại: `http://localhost:3001`.
 
-Terminal 2 - frontend:
+Terminal 2 - Frontend:
 
 ```powershell
 npm.cmd --prefix frontend run dev
 ```
 
-Open `http://localhost:3000` in a browser. The menu requests products from
-`GET http://localhost:3001/products`; keep the backend running while using the
-frontend.
+Mở trình duyệt và truy cập: `http://localhost:3000`. Trang thực đơn sẽ gửi yêu cầu lấy danh sách thức uống từ `GET http://localhost:3001/products`; vui lòng giữ backend luôn hoạt động trong quá trình sử dụng frontend.
 
-## Current API
+### Khởi chạy bằng Docker Compose (Khuyên dùng cho Demo)
 
-`GET /products` returns products from the database. A product currently contains:
-`id`, `name`, `price` (integer VND), `imageUrl`, and `stock` (inventory quantity).
-It does not yet return category or description. See [the API contract and open decisions](docs/api-contracts.md).
+Nếu máy đã cài đặt Docker Desktop, bạn có thể chạy toàn bộ hệ thống (PostgreSQL, Backend, Frontend) chỉ với một lệnh:
 
-The backend enables CORS for local frontend requests. `POST /orders` creates a
-validated `PENDING` order in PostgreSQL, including item and price snapshots.
-The order, its items, stock deductions and any promotion usage are saved in one
-transaction, and orders survive backend restarts. Insufficient stock rejects the
-order; successful checkout reloads the menu inventory. The repository also
-contains authentication, payment simulation, and order-history features; these
-still need to be verified together in an end-to-end run before they are treated
-as accepted. Payments in this project are simulated and must not use real
-payment credentials.
+```powershell
+docker compose up --build
+```
 
-## Checks
+Sau khi hoàn tất, mở trình duyệt vào `http://localhost:3000` để sử dụng.
 
-Run from the repository root:
+## Hiện trạng API
+
+`GET /products` trả về danh sách thức uống từ CSDL. Mỗi sản phẩm hiện bao gồm:
+`id`, `name`, `price` (số nguyên VND), `imageUrl`, và `stock` (số lượng tồn kho trong CSDL).
+API hiện tại chưa trả về trường category và description (frontend tạm phân loại dựa trên tên). Chi tiết xem tại [Hợp đồng API và các quyết định mở](docs/api-contracts.md).
+
+Backend đã cấu hình CORS cho phép các yêu cầu từ frontend cục bộ. `POST /orders` tạo một đơn hàng hợp lệ ở trạng thái `PENDING` trong PostgreSQL, bao gồm bản lưu thông tin (snapshot) sản phẩm, size, topping và giá tại thời điểm đặt. Đơn hàng, chi tiết đơn, khấu trừ tồn kho và việc sử dụng mã khuyến mãi được thực hiện đồng thời trong một transaction; dữ liệu đơn hàng vẫn được lưu trữ bền vững sau khi khởi động lại backend. Nếu tồn kho không đủ, đơn hàng sẽ bị từ chối; sau khi thanh toán thành công, thực đơn sẽ cập nhật lại số lượng tồn kho mới. Dự án cũng tích hợp đầy đủ tính năng xác thực tài khoản JWT, thanh toán mô phỏng SePay Sandbox và xem lịch sử đơn hàng. Thanh toán trong dự án hoàn toàn là mô phỏng và tuyệt đối không sử dụng thông tin thanh toán thật.
+
+## Kiểm tra và kiểm thử (Checks)
+
+Chạy từ thư mục gốc của dự án:
 
 ```powershell
 npm.cmd --prefix backend run build
@@ -129,46 +125,33 @@ npm.cmd test -- src/orders/orders-concurrency.service.spec.ts
 npm.cmd run test:e2e -- test/orders-concurrency.e2e-spec.ts
 ```
 
-The backend e2e suite requires the configured PostgreSQL database with migrations
-applied and menu data seeded. It covers the product list, order creation,
-persistence after closing the app, stock deduction, insufficient stock, transaction
-rollback and concurrent promotion checkout. The persistence tests create unique
-fixtures and remove them after testing. See
-[the API contract](docs/api-contracts.md) for the order payload and validation
-rules.
+Bộ e2e test của backend yêu cầu CSDL PostgreSQL đang hoạt động, đã được áp dụng migration và nạp dữ liệu mẫu. Bộ kiểm thử bao phủ: danh sách món, tạo đơn, lưu trữ bền vững khi khởi động lại ứng dụng, khấu trừ tồn kho, xử lý khi không đủ hàng, rollback transaction, kiểm tra trùng lặp với Idempotency-Key, webhook thanh toán lặp lại, kiểm soát tồn kho đồng thời với optimistic locking và sử dụng mã khuyến mãi đồng thời.
 
-GitHub Actions runs backend build, lint, unit tests, and e2e tests against a
-temporary PostgreSQL service, plus frontend lint and production build, for pull
-requests and pushes to `main`.
+GitHub Actions tự động chạy quy trình CI: build, lint, unit tests, và e2e tests của backend trên một PostgreSQL service tạm thời, kết hợp với lint và build production của frontend cho mỗi pull request và push vào nhánh `main`.
 
-## Environment variables
+## Biến môi trường
 
-Set `DATABASE_URL` in `backend/.env` for PostgreSQL and `JWT_SECRET` for login.
-`.env.example` contains configuration placeholders. Never commit `.env` files,
-passwords, JWT secrets, or payment credentials.
+Cấu hình `DATABASE_URL` trong file `backend/.env` cho PostgreSQL và `JWT_SECRET` cho xác thực đăng nhập.
+File `.env.example` chứa các biến mẫu. **Tuyệt đối không đưa file `.env`, mật khẩu cá nhân, khóa bí mật JWT hay thông tin thanh toán lên Git.**
 
-## Team workflow
+## Quy trình làm việc nhóm
 
-1. Agree on a task and its acceptance criteria.
-2. Coordinate API request/response fields using [the API contract](docs/api-contracts.md).
-3. Create a branch for the task; do not commit directly to `main`.
-4. Make and test a focused change, then open a pull request for review.
-5. Update the progress workbook after the work is verified.
+1. Thống nhất về task và tiêu chí hoàn thành (acceptance criteria).
+2. Phối hợp các trường request/response theo tài liệu [Hợp đồng API](docs/api-contracts.md).
+3. Tạo nhánh riêng (branch) cho từng task; không commit trực tiếp vào nhánh `main`.
+4. Thực hiện thay đổi tập trung, kiểm thử cẩn thận, sau đó mở pull request để các thành viên review.
+5. Cập nhật bảng theo dõi tiến độ [BrewLite-Tien-do.xlsx](BrewLite-Tien-do.xlsx) sau khi công việc đã được nghiệm thu.
 
-## Kiệt's coordination checklist
+## Checklist điều phối của Kiệt (Nhóm trưởng)
 
-- Keep these setup and validation instructions aligned with the repository.
-- Track task owners, pull requests, blockers, and test evidence in the progress
-  workbook; a merged pull request alone does not mean a task passed acceptance.
-- Before a demo, confirm PostgreSQL, migrations, and seed data are ready, then
-  run the backend and frontend together through the main customer flow.
-- Record remaining issues and who will follow up; do not include local secrets
-  or `.env` files in commits.
-
+- Giữ các hướng dẫn cài đặt và kiểm thử luôn đồng bộ với trạng thái thực tế của repository.
+- Theo dõi người phụ trách task, pull request, vướng mắc và bằng chứng kiểm thử trong bảng tiến độ; một pull request được merge chưa đồng nghĩa với việc task đã qua nghiệm thu.
+- Trước buổi demo, xác nhận PostgreSQL, migrations và dữ liệu mẫu đã sẵn sàng; sau đó chạy backend và frontend cùng nhau qua toàn bộ luồng khách hàng chính.
+- Ghi nhận các vấn đề còn tồn đọng và phân công người tiếp tục xử lý; không đưa bí mật cục bộ hoặc file `.env` vào commit.
 
 ---
 
-## HƯỚNG DẪN CÀI ĐẶT VÀ CHẠY BREWLITE
+## HƯỚNG DẪN CÀI ĐẶT VÀ CHẠY BREWLITE (Tích hợp SePay Sandbox & ngrok)
 
 Áp dụng cho các thành viên đã có source code trên máy.
 
@@ -188,7 +171,7 @@ Ví dụ cấu hình PostgreSQL:
 DATABASE_URL="postgresql://postgres:YOUR_DB_PASSWORD@localhost:5432/brewLite?schema=public"
 ```
 
-Đồng thời cấu hình thông tin SePay riêng:
+Đồng thời cấu hình thông tin SePay riêng (dùng môi trường Sandbox test):
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/brewLite?schema=public"
 JWT_SECRET="dev-secret-change-this-to-a-long-random-value"
@@ -240,8 +223,7 @@ Mở đường dẫn được Frontend hiển thị, thường là:
 3. Tiếp tục vào: [https://dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken) lấy Authtoken riêng.
 
 ### Bước 8: Chạy ngrok bằng Docker
-Mở CMD mới.  
-Nhập:
+Mở CMD mới và nhập:
 ```cmd
 set /p NGROK_AUTHTOKEN=Nhap ngrok authtoken:
 ```
@@ -261,7 +243,7 @@ Nếu thành công, ngrok sẽ hiển thị URL HTTPS. Giữ CMD chạy ngrok ho
 ### Bước 9: Cấu hình SePay riêng
 1. Truy cập [https://my.sepay.vn](https://my.sepay.vn), đăng ký hoặc đăng nhập tài khoản SePay riêng và hoàn tất cấu hình nguồn giao dịch/ngân hàng theo yêu cầu của SePay.
 2. Mở phần cấu hình IPN: [https://my.sepay.vn/pg/merchant/ipn](https://my.sepay.vn/pg/merchant/ipn)
-3. Thiết lập:
+3. Thiết lập các giá trị:
 
 | Mục | Giá trị |
 |---|---|
@@ -276,11 +258,11 @@ Nhấn **Cập nhật** để lưu.
 *Lưu ý:* Thông tin tài khoản nhận tiền trong QR và cấu hình SePay phải phù hợp với nhau. Chỉ đổi IPN và Secret Key chưa chắc đã đủ nếu Backend đang sử dụng thông tin ngân hàng cố định trong code.
 
 ### Bước 10: Những lần chạy sau
-Khi đã cài đặt thành công, chỉ cần:
+Khi đã cài đặt thành công, các lần chạy sau chỉ cần:
 1. Mở Docker Desktop.
-2. Chạy PostgreSQL bằng: `docker start brewLite-db`
-3. Chạy Backend bằng: `npm run start:dev`
-4. Chạy Frontend bằng: `npm run dev`
+2. Chạy PostgreSQL bằng: `docker start brewLite-db` (hoặc service PostgreSQL của Windows).
+3. Chạy Backend bằng: `npm run start:dev` (trong thư mục `backend`).
+4. Chạy Frontend bằng: `npm run dev` (trong thư mục `frontend`).
 5. Chạy ngrok bằng Docker với domain riêng.
 6. Kiểm tra IPN trên SePay.
 7. Mở BrewLite và kiểm thử thanh toán.
