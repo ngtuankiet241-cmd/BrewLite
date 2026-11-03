@@ -13,6 +13,7 @@ export class ProductsService {
       name: product.name,
       price: product.price.toNumber(),
       imageUrl: product.imageUrl ?? '',
+      stock: product.stock,
     }));
   }
 }

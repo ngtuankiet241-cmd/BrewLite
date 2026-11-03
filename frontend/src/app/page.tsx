@@ -3,6 +3,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import CartDrawer from "../components/CartDrawer";
 import { useCart } from "../context/CartContext";
+import AuthModal from "../components/AuthModal";
+import { fetchAccount } from "../lib/account";
+import { getQuantityError } from "../lib/inventory";
 
 // ============================================================================
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES & INTERFACES)
@@ -16,6 +19,7 @@ export interface BackendProduct {
   name: string;
   price: number;
   imageUrl: string;
+  stock: number;
 }
 
 /**
@@ -23,7 +27,6 @@ export interface BackendProduct {
  */
 export interface Product extends BackendProduct {
   category: string;
-  stock: number;
   description?: string;
 }
 
@@ -103,7 +106,36 @@ const formatPriceVND = (price: number): string => {
 // 4. MAIN COMPONENT: MENU PAGE
 // ============================================================================
 
+
+        //login
+  type AuthUser = {
+  id: string;
+  email: string;
+  phone: string;
+  loyaltyPoints: number;
+};
+
+
+ 
 export default function MenuPage() {
+  // kiểm tra đăng nhập 
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  // Xử lý khi đăng nhập thành công
+const handleLoginSuccess = (user: AuthUser, token: string) => {
+  setAuthUser(user);
+  localStorage.setItem("brewlite_access_token", token);
+  localStorage.setItem("brewlite_user", JSON.stringify(user));
+};
+
+// Xử lý đăng xuất
+const handleLogout = () => {
+  localStorage.removeItem("brewlite_access_token");
+  localStorage.removeItem("brewlite_user");
+  setAuthUser(null);
+};
+
   // Quản lý danh sách sản phẩm lấy từ Backend API
   const [products, setProducts] = useState<Product[]>([]);
   // Trạng thái đang tải dữ liệu (Loading)
@@ -114,7 +146,7 @@ export default function MenuPage() {
   // Danh mục đang được chọn để lọc (Tất cả, Cà phê, Trà trái cây, Khác)
   const [selectedCategory, setSelectedCategory] = useState<string>("Tất cả");
 
-  const { addToCart, totalItemsCount, totalAmount, isHydrated } = useCart();
+  const { items: cartItems, addToCart, totalItemsCount, totalAmount, isHydrated } = useCart();
   const [isCartOpen, setIsCartOpen] = useState(false);
 
   // --------------------------------------------------------------------------
@@ -129,6 +161,14 @@ export default function MenuPage() {
   // Số lượng món được chọn (mặc định là 1)
   const [quantity, setQuantity] = useState<number>(1);
   const [quantityInput, setQuantityInput] = useState("1");
+  const selectedStock = selectedProduct
+    ? products.find((product) => product.id === selectedProduct.id)?.stock ?? selectedProduct.stock
+    : 0;
+  const quantityInCart = selectedProduct
+    ? cartItems.reduce((sum, item) => sum + (item.id === selectedProduct.id ? item.quantity : 0), 0)
+    : 0;
+  const availableQuantity = Math.max(0, selectedStock - quantityInCart);
+  const quantityError = selectedProduct ? getQuantityError(quantityInput, availableQuantity) : null;
 
   // --------------------------------------------------------------------------
   // STATE CHO MODAL THÔNG BÁO THÀNH CÔNG (SUCCESS DIALOG POPUP)
@@ -155,7 +195,7 @@ export default function MenuPage() {
 
       const data: BackendProduct[] = await response.json();
 
-      // Bổ sung category theo tên và thiết lập giá trị mặc định cho stock/description
+      // Bổ sung category theo tên và thiết lập giá trị mặc định cho description
       const mappedProducts: Product[] = data.map((item) => {
         const lowerName = item.name.toLowerCase();
 
@@ -183,7 +223,6 @@ export default function MenuPage() {
         return {
           ...item,
           category,
-          stock: (item as unknown as { stock?: number }).stock ?? 20,
           description:
             (item as unknown as { description?: string }).description ??
             defaultDescription,
@@ -203,6 +242,15 @@ export default function MenuPage() {
     }
   }, []);
 
+// giữ trạng thái đăng nhập khi mở lại trang
+  useEffect(() => {
+  const controller = new AbortController();
+  fetchAccount(controller.signal).then((account) => {
+    if (!controller.signal.aborted) setAuthUser({ ...account, phone: account.phone ?? "" });
+  }).catch(() => {});
+  return () => controller.abort();
+}, []);
+
   // Gọi fetch API khi component mount lần đầu
   useEffect(() => {
     // The request updates page state after its asynchronous response resolves.
@@ -215,6 +263,7 @@ export default function MenuPage() {
    * Khởi tạo lại các tùy chọn mặc định (Size Nhỏ, chưa chọn topping nào, số lượng = 1)
    */
   const handleOpenDetailModal = (product: Product) => {
+    if (product.stock <= 0) return;
     setSelectedProduct(product);
     setSelectedSize(SIZE_OPTIONS[0]);
     setSelectedToppings([]);
@@ -242,9 +291,8 @@ export default function MenuPage() {
    * Xử lý tăng số lượng (tối đa không vượt quá tồn kho stock của sản phẩm)
    */
   const handleIncreaseQuantity = () => {
-    if (!selectedProduct) return;
-    const maxStock = selectedProduct.stock || 99;
-    const nextQuantity = Math.min(maxStock, quantity + 1);
+    if (!selectedProduct || quantityError || quantity >= availableQuantity) return;
+    const nextQuantity = quantity + 1;
     setQuantity(nextQuantity);
     setQuantityInput(String(nextQuantity));
   };
@@ -255,18 +303,8 @@ export default function MenuPage() {
 
     const parsedQuantity = Number(value);
     if (Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0) {
-      setQuantity(Math.min(selectedProduct.stock || 99, parsedQuantity));
+      setQuantity(parsedQuantity);
     }
-  };
-
-  const handleQuantityInputBlur = () => {
-    const parsedQuantity = Number(quantityInput);
-    const normalizedQuantity =
-      Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0
-        ? Math.min(selectedProduct?.stock || 99, parsedQuantity)
-        : quantity;
-    setQuantity(normalizedQuantity);
-    setQuantityInput(String(normalizedQuantity));
   };
 
   /**
@@ -309,13 +347,14 @@ export default function MenuPage() {
    * Cập nhật đúng số lượng & tổng tiền, mở Modal Popup Thông Báo Thành Công
    */
   const handleAddToCart = () => {
-    if (!selectedProduct) return;
+    if (!authUser || !localStorage.getItem("brewlite_access_token")) {
+      setIsAuthOpen(true);
+      return;
+    }
 
-    const parsedQuantity = Number(quantityInput);
-    const quantityToAdd =
-      Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0
-        ? Math.min(selectedProduct.stock || 99, parsedQuantity)
-        : quantity;
+    if (!selectedProduct || !isHydrated || quantityError) return;
+
+    const quantityToAdd = Number(quantityInput);
     setQuantity(quantityToAdd);
     setQuantityInput(String(quantityToAdd));
     const totalPrice = calculateTotalPrice(quantityToAdd);
@@ -376,69 +415,165 @@ export default function MenuPage() {
         {/* ------------------------------------------------------------------ */}
         {/* HEADER: Tên quán, Subtitle và Icon Menu                             */}
         {/* ------------------------------------------------------------------ */}
-        <header className="sticky top-0 z-20 bg-[#FCFBF8]/90 backdrop-blur-md border-b border-stone-200/70 px-4 py-3.5 transition-all">
-          <div className="flex items-center justify-between">
-            {/* Nhánh bên trái: Tên thương hiệu & Subtitle */}
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block animate-pulse" />
-                <h1 className="text-xl font-bold tracking-tight text-emerald-950 font-sans">
-                  BrewLite
-                </h1>
-              </div>
-              <p className="text-[11px] font-medium tracking-wide uppercase text-amber-900/75 mt-0.5">
-                Cashless Drink Ordering
-              </p>
-            </div>
+        
+<header className="sticky top-0 z-20 bg-[#FCFBF8]/90 backdrop-blur-md border-b border-stone-200/70 px-4 py-3.5 transition-all">
+  <div className="flex items-center justify-between gap-2">
+    {/* Thương hiệu BrewLite */}
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5">
+        <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block animate-pulse" />
+        <h1 className="text-xl font-bold tracking-tight text-emerald-950 font-sans">
+          BrewLite
+        </h1>
+      </div>
+      <p className="text-[11px] font-medium tracking-wide uppercase text-amber-900/75 mt-0.5">
+        Cashless Drink Ordering
+      </p>
+    </div>
 
-            {/* Nhánh bên phải: Nút Menu Icon nhỏ gọn */}
-            <button
-              type="button"
-              aria-label="Mở danh mục menu"
-              onClick={() => alert("Menu tùy chọn đang được phát triển")}
-              className="p-2 rounded-xl text-stone-600 hover:text-emerald-900 hover:bg-stone-200/60 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
-            >
-              <svg
-                className="w-5 h-5 stroke-current"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="4" y1="7" x2="20" y2="7" />
-                <line x1="4" y1="12" x2="20" y2="12" />
-                <line x1="4" y1="17" x2="14" y2="17" />
-              </svg>
-            </button>
-          </div>
+    {/* Đăng nhập / Thông tin tài khoản / Đăng xuất */}
+    <div className="flex items-center gap-2 shrink-0">
+      {authUser ? (
+        <>
+          <span
+            className="text-[11px] font-semibold text-emerald-950 max-w-[95px] truncate"
+            title={authUser.phone}
+          >
+            {authUser.phone}
+          </span>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="px-2.5 py-2 rounded-xl bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-xs font-semibold transition-colors"
+          >
+            Đăng xuất
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setIsAuthOpen(true)}
+          className="px-3 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold transition-colors"
+        >
+          Đăng nhập
+        </button>
+      )}
 
-          {/* Thanh công cụ hỗ trợ kiểm thử nghiệm thu (DoD Tester Toolbar) */}
-          <div className="mt-3 pt-2 border-t border-stone-200/50 flex items-center justify-between text-xs">
-            <span className="text-[11px] font-medium text-stone-600 flex items-center gap-1">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-700" />
-              Thực đơn hôm nay
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={fetchProducts}
-                className="px-2 py-0.5 rounded-md bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-[10px] font-medium transition-colors cursor-pointer"
-                title="Tải lại dữ liệu từ Backend API"
-              >
-                Tải lại API
-              </button>
-              <button
-                type="button"
-                onClick={() => setProducts([])}
-                className="px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-medium transition-colors cursor-pointer"
-                title="Giả lập danh sách rỗng để nghiệm thu Empty state"
-              >
-                Test Empty
-              </button>
-            </div>
-          </div>
-        </header>
+     {/* MENU NGƯỜI DÙNG */}
+<div className="relative">
+  <button
+    type="button"
+    aria-label="Mở menu người dùng"
+    aria-expanded={isUserMenuOpen}
+    onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+    className="p-2 rounded-xl text-stone-600 hover:text-emerald-900 hover:bg-stone-200/60 transition-all"
+  >
+    <svg
+      className="w-5 h-5 stroke-current"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="14" y2="17" />
+    </svg>
+  </button>
+
+  {isUserMenuOpen && (
+    <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-stone-200 py-2 z-50">
+      <button
+        type="button"
+        onClick={() => {
+          setIsUserMenuOpen(false);
+          window.location.href = "/";
+        }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-stone-100"
+      >
+        🏠 Trang chủ
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setIsUserMenuOpen(false);
+          if (!authUser) {
+            setIsAuthOpen(true);
+          } else {
+            window.location.href = "/account";
+          }
+        }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-stone-100"
+      >
+        👤 Thông tin tài khoản
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setIsUserMenuOpen(false);
+          if (!authUser) {
+            setIsAuthOpen(true);
+          } else {
+            window.location.href = "/orders/history";
+          }
+        }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-stone-100"
+      >
+        🧾 Lịch sử đặt hàng
+      </button>
+
+      {authUser && (
+        <>
+          <div className="border-t border-stone-200 my-1" />
+          <button
+            type="button"
+            onClick={() => {
+              setIsUserMenuOpen(false);
+              handleLogout();
+            }}
+            className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
+          >
+            🚪 Đăng xuất
+          </button>
+        </>
+      )}
+    </div>
+  )}
+</div>
+    </div>
+  </div>
+
+  {/* Thanh công cụ kiểm thử: giữ nguyên */}
+  <div className="mt-3 pt-2 border-t border-stone-200/50 flex items-center justify-between text-xs">
+    <span className="text-[11px] font-medium text-stone-600 flex items-center gap-1">
+      <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-700" />
+      Thực đơn hôm nay
+    </span>
+
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={fetchProducts}
+        className="px-2 py-0.5 rounded-md bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-[10px] font-medium transition-colors cursor-pointer"
+        title="Tải lại dữ liệu từ Backend API"
+      >
+        Tải lại API
+      </button>
+      <button
+        type="button"
+        onClick={() => setProducts([])}
+        className="px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-medium transition-colors cursor-pointer"
+        title="Giả lập danh sách rỗng để nghiệm thu Empty state"
+      >
+        Test Empty
+      </button>
+    </div>
+  </div>
+</header>
+
 
         {/* ------------------------------------------------------------------ */}
         {/* BANNER CHÀO MỪNG SANG TRỌNG TONE XANH RÊU                          */}
@@ -652,7 +787,7 @@ export default function MenuPage() {
                         />
                         {/* Tag số lượng có sẵn */}
                         <span className="absolute top-2 right-2 bg-black/45 backdrop-blur-md text-white text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/10 shadow-xs">
-                          Còn {product.stock}
+                          {product.stock > 0 ? `Còn ${product.stock}` : "Hết hàng"}
                         </span>
                       </div>
 
@@ -694,7 +829,14 @@ export default function MenuPage() {
           <div className="p-3 bg-gradient-to-t from-[#FCFBF8] via-[#FCFBF8]/95 to-transparent pointer-events-auto">
             <button
               type="button"
-              onClick={() => setIsCartOpen(true)}
+              onClick={() => {
+  if (!authUser || !localStorage.getItem("brewlite_access_token")) {
+    setIsAuthOpen(true);
+    return;
+  }
+
+  setIsCartOpen(true);
+}}
               className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-semibold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-900/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer"
             >
               {/* Biểu tượng Giỏ hàng và số lượng */}
@@ -743,8 +885,10 @@ export default function MenuPage() {
         </footer>
 
         <CartDrawer
+          products={products}
           isOpen={isCartOpen}
           onClose={() => setIsCartOpen(false)}
+          onOrderCreated={fetchProducts}
         />
 
         {/* ------------------------------------------------------------------ */}
@@ -938,8 +1082,13 @@ export default function MenuPage() {
                       Số lượng
                     </span>
                     <span className="text-[11px] text-stone-500">
-                      Còn {selectedProduct.stock} món trong kho
+                      Còn {selectedStock} món trong kho
                     </span>
+                    {quantityInCart > 0 && (
+                      <span className="block text-[11px] text-stone-500">
+                        Đã có {quantityInCart} trong giỏ, có thể thêm {availableQuantity} món
+                      </span>
+                    )}
                   </div>
 
                   {/* Nút - / Số lượng / Nút + dạng Stepper bo tròn */}
@@ -957,16 +1106,17 @@ export default function MenuPage() {
                       type="text"
                       inputMode="numeric"
                       aria-label="Nhập số lượng món"
+                      aria-invalid={Boolean(quantityError)}
+                      aria-describedby={quantityError ? "product-quantity-error" : undefined}
                       value={quantityInput}
                       onChange={(event) =>
                         handleQuantityInputChange(event.target.value)
                       }
-                      onBlur={handleQuantityInputBlur}
                       className="h-8 w-14 rounded-lg border border-stone-200 bg-white text-center text-sm font-bold text-stone-900 outline-none focus:border-emerald-700"
                     />
                     <button
                       type="button"
-                      disabled={quantity >= selectedProduct.stock}
+                      disabled={Boolean(quantityError) || quantity >= availableQuantity}
                       onClick={handleIncreaseQuantity}
                       aria-label="Tăng số lượng"
                       className="w-8 h-8 rounded-xl bg-white border border-stone-200 text-stone-800 flex items-center justify-center font-bold text-base shadow-xs disabled:opacity-35 disabled:cursor-not-allowed hover:bg-stone-50 active:scale-95 transition-all cursor-pointer"
@@ -976,11 +1126,18 @@ export default function MenuPage() {
                   </div>
                 </div>
 
+                {quantityError && (
+                  <p id="product-quantity-error" role="alert" className="text-xs text-rose-700">
+                    {quantityError}
+                  </p>
+                )}
+
                 {/* NÚT THÊM VÀO GIỎ VỚI ĐƠN GIÁ ĐÃ NHÂN SỐ LƯỢNG */}
                 <button
                   type="button"
                   onClick={handleAddToCart}
-                  className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer"
+                  disabled={!isHydrated || Boolean(quantityError)}
+                  className="w-full bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold py-3.5 px-5 rounded-2xl shadow-lg shadow-emerald-950/20 active:scale-[0.99] transition-all flex items-center justify-between cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="text-sm">
                     Thêm vào giỏ • {quantity} {quantity > 1 ? "ly" : "món"}
@@ -1103,6 +1260,12 @@ export default function MenuPage() {
             </div>
           </div>
         )}
+        {isAuthOpen && (
+  <AuthModal
+    onClose={() => setIsAuthOpen(false)}
+    onLoginSuccess={handleLoginSuccess}
+  />
+)}
       </main>
     </div>
   );

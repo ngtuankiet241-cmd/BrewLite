@@ -10,7 +10,14 @@ export enum OrderToppingId {
   Cheese = 'cheese',
 }
 
-export type OrderStatus = 'PENDING';
+export type OrderStatus =
+  | 'PENDING'
+  | 'PAID'
+  | 'PREPARING'
+  | 'READY'
+  | 'COMPLETED'
+  | 'PAYMENT_FAILED'
+  | 'CANCELLED';
 
 export interface OrderOption {
   id: string;
@@ -34,5 +41,11 @@ export interface Order {
   status: OrderStatus;
   items: OrderItem[];
   totalAmount: number;
+  subtotalAmount?: number;
+  discountAmount?: number;
+  promotionCode?: string;
+  pointsRedeemed?: number;
+  pointsDiscount?: number;
+  pointsEarned?: number;
   createdAt: string;
 }

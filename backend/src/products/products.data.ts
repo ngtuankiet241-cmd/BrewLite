@@ -1,6 +1,6 @@
 import type { Product } from './product.type.js';
 
-export const PRODUCTS: Product[] = [
+export const PRODUCTS: Omit<Product, 'stock'>[] = [
   {
     id: 'coffee-milk',
     name: 'Cà phê sữa',

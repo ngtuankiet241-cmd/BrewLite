@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useCart } from "../context/CartContext";
+import PromotionInput, { type PromotionQuote } from "./PromotionInput";
+import { API_URL, fetchAccount, type Account } from "../lib/account";
+import { checkoutKey } from "../lib/checkout";
+import { getQuantityError } from "../lib/inventory";
 
 interface CartDrawerProps {
+  products: ReadonlyArray<{ id: string; stock: number }>;
   isOpen: boolean;
   onClose: () => void;
+  onOrderCreated: () => void;
 }
 
 const formatPriceVND = (price: number): string =>
@@ -18,69 +25,97 @@ function CartQuantityControl({
   cartItemId,
   quantity,
   name,
-  updateQuantity,
+  quantityInput,
+  maxQuantity,
+  disabled,
+  onInputChange,
+  onRemove,
 }: {
   cartItemId: string;
   quantity: number;
   name: string;
-  updateQuantity: (cartItemId: string, quantity: number) => void;
+  quantityInput: string;
+  maxQuantity: number;
+  disabled: boolean;
+  onInputChange: (value: string) => void;
+  onRemove: () => void;
 }) {
-  const [quantityInput, setQuantityInput] = useState(String(quantity));
+  const quantityError = getQuantityError(quantityInput, maxQuantity);
 
   const update = (nextQuantity: number) => {
-    updateQuantity(cartItemId, nextQuantity);
-    setQuantityInput(String(nextQuantity));
+    if (disabled) return;
+    if (nextQuantity === 0) onRemove();
+    else onInputChange(String(nextQuantity));
   };
 
   const handleInputChange = (value: string) => {
-    setQuantityInput(value);
-    if (!/^\d+$/.test(value)) return;
-
-    const parsedQuantity = Number(value);
-    if (Number.isSafeInteger(parsedQuantity) && parsedQuantity > 0) {
-      updateQuantity(cartItemId, parsedQuantity);
-    }
-  };
-
-  const handleInputBlur = () => {
-    const parsedQuantity = Number(quantityInput);
-    if (!Number.isSafeInteger(parsedQuantity) || parsedQuantity < 1) {
-      setQuantityInput(String(quantity));
-    }
+    if (disabled) return;
+    onInputChange(value);
   };
 
   return (
-    <div className="flex items-center gap-2 rounded-xl bg-stone-100 p-1">
-      <button
-        type="button"
-        onClick={() => update(Math.max(0, quantity - 1))}
-        aria-label={`Giảm số lượng ${name}`}
-        className="flex h-7 w-7 items-center justify-center rounded-lg bg-white font-bold text-stone-800"
-      >
-        −
-      </button>
-      <input
-        type="text"
-        inputMode="numeric"
-        aria-label={`Nhập số lượng ${name}`}
-        value={quantityInput}
-        onChange={(event) => handleInputChange(event.target.value)}
-        onBlur={handleInputBlur}
-        className="h-7 w-12 rounded-lg border border-stone-200 bg-white text-center text-sm font-bold text-stone-900 outline-none focus:border-emerald-700"
-      />
-      <button
-        type="button"
-        onClick={() => update(quantity + 1)}
-        aria-label={`Tăng số lượng ${name}`}
-        className="flex h-7 w-7 items-center justify-center rounded-lg bg-white font-bold text-stone-800"
-      >
-        +
-      </button>
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 rounded-xl bg-stone-100 p-1">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            update(Math.max(0, (Number(quantityInput) || quantity) - 1))
+          }
+          aria-label={`Giảm số lượng ${name}`}
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white font-bold text-stone-800"
+        >
+          −
+        </button>
+        <input
+          type="text"
+          inputMode="numeric"
+          aria-label={`Nhập số lượng ${name}`}
+          disabled={disabled}
+          aria-invalid={!disabled && Boolean(quantityError)}
+          aria-describedby={
+            !disabled && quantityError
+              ? `quantity-error-${cartItemId}`
+              : undefined
+          }
+          value={quantityInput}
+          onChange={(event) => handleInputChange(event.target.value)}
+          className="h-7 w-12 rounded-lg border border-stone-200 bg-white text-center text-sm font-bold text-stone-900 outline-none focus:border-emerald-700"
+        />
+        <button
+          type="button"
+          disabled={
+            disabled ||
+            Boolean(quantityError) ||
+            Number(quantityInput) >= maxQuantity
+          }
+          onClick={() => update(quantity + 1)}
+          aria-label={`Tăng số lượng ${name}`}
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white font-bold text-stone-800 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          +
+        </button>
+      </div>
+      {!disabled && quantityError && (
+        <p
+          id={`quantity-error-${cartItemId}`}
+          role="alert"
+          className="max-w-44 text-xs text-rose-700"
+        >
+          {quantityError}
+        </p>
+      )}
     </div>
   );
 }
 
-export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
+export default function CartDrawer({
+  products,
+  isOpen,
+  onClose,
+  onOrderCreated,
+}: CartDrawerProps) {
+  const router = useRouter();
   const {
     items,
     totalAmount,
@@ -89,8 +124,63 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     removeFromCart,
     clearCart,
   } = useCart();
-  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+  const [currentOrderCode, setCurrentOrderCode] = useState<string | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [quantityInputs, setQuantityInputs] = useState<Record<string, { quantity: number; value: string }>>({});
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [pointsError, setPointsError] = useState<string | null>(null);
+  const [confirmedTotal, setConfirmedTotal] = useState<number | null>(null);
+  const [pointsSelection, setPointsSelection] = useState<{
+    cartItems: typeof items; promotionCode: string | undefined; points: number;
+  } | null>(null);
+  const [promotionCode, setPromotionCode] = useState("");
+  const [isValidatingPromotion, setIsValidatingPromotion] = useState(false);
+  const [promotionSelection, setPromotionSelection] = useState<{
+    cartItems: typeof items;
+    quote: PromotionQuote;
+  } | null>(null);
+  const cartKey = JSON.stringify(items);
+  const appliedPromotion =
+    promotionSelection?.cartItems === items ? promotionSelection.quote : null;
+  const pointsToRedeem = pointsSelection?.cartItems === items &&
+    pointsSelection.promotionCode === appliedPromotion?.code ? pointsSelection.points : 0;
+  const afterPromotion = appliedPromotion?.totalAmount ?? totalAmount;
+  const pointValue = account?.loyaltyPolicy.pointValue ?? 10;
+  const maxPoints = Math.min(account?.loyaltyPoints ?? 0, Math.floor(afterPromotion / pointValue));
+  const invalidPoints = !currentOrderCode && pointsToRedeem > maxPoints;
+  const pointsDiscount = pointsToRedeem * pointValue;
+  const payableAmount = confirmedTotal ?? Math.max(0, afterPromotion - pointsDiscount);
+  const stockByProduct = new Map(products.map((product) => [product.id, product.stock]));
+  const quantitiesByProduct = new Map<string, number>();
+  for (const item of items) {
+    quantitiesByProduct.set(item.id, (quantitiesByProduct.get(item.id) ?? 0) + item.quantity);
+  }
+  const maxQuantityFor = (item: typeof items[number]) =>
+    Math.max(0, (stockByProduct.get(item.id) ?? 0) - ((quantitiesByProduct.get(item.id) ?? 0) - item.quantity));
+  const quantityInputFor = (item: typeof items[number]) => {
+    const draft = quantityInputs[item.cartItemId];
+    return draft?.quantity === item.quantity ? draft.value : String(item.quantity);
+  };
+  const invalidQuantities = items.some((item) =>
+    Boolean(getQuantityError(quantityInputFor(item), maxQuantityFor(item))),
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const controller = new AbortController();
+    fetchAccount(controller.signal).then((data) => {
+      if (controller.signal.aborted) return;
+      setAccount(data);
+      setPointsError(null);
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setAccount(null);
+      setPointsError(error instanceof Error ? error.message : "Không thể tải điểm thưởng.");
+    });
+    return () => controller.abort();
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -111,62 +201,76 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   if (!isOpen) return null;
 
   const handleClearCart = () => {
+    if (currentOrderCode) return;
     clearCart();
     setCheckoutNotice(null);
+    setPromotionCode("");
+    setPromotionSelection(null);
   };
 
   const handleCreateOrder = async () => {
-    if (items.length === 0 || isSubmittingOrder) return;
+    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion || currentOrderCode || invalidPoints || invalidQuantities) return;
+
+    const token = localStorage.getItem("brewlite_access_token");
+    if (!token) {
+      setCheckoutNotice("Vui lòng đăng nhập trước khi đặt hàng.");
+      return;
+    }
 
     setCheckoutNotice(null);
     setIsSubmittingOrder(true);
-
     try {
-      const response = await fetch("http://localhost:3001/orders", {
+      const body = JSON.stringify({
+        ...(appliedPromotion ? { promotionCode: appliedPromotion.code } : {}),
+        pointsToRedeem,
+        items: items.map((item) => ({
+          productId: item.id,
+          quantity: item.quantity,
+          sizeId: item.size.id,
+          toppingIds: item.toppings.map((topping) => topping.id),
+        })),
+      });
+      const response = await fetch(`${API_URL}/orders`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: items.map((item) => ({
-            productId: item.id,
-            quantity: item.quantity,
-            sizeId: item.size.id,
-            toppingIds: item.toppings.map((topping) => topping.id),
-          })),
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": checkoutKey("order", JSON.stringify([cartKey, body])),
+        },
+        body,
       });
       const result: unknown = await response.json();
-
       if (!response.ok) {
         const message =
-          typeof result === "object" &&
-          result !== null &&
-          "message" in result
+          typeof result === "object" && result !== null && "message" in result
             ? result.message
             : null;
         throw new Error(
           typeof message === "string"
             ? message
             : Array.isArray(message)
-              ? message.join(', ')
+              ? message.join(", ")
               : `Không thể tạo đơn (HTTP ${response.status}).`,
         );
       }
-
       if (
-        typeof result !== "object" ||
-        result === null ||
-        !("orderCode" in result) ||
-        typeof result.orderCode !== "string" ||
-        !("status" in result) ||
-        result.status !== "PENDING"
+        typeof result !== "object" || result === null ||
+        !("orderCode" in result) || typeof result.orderCode !== "string" ||
+        !("status" in result) || !["PENDING", "PAID"].includes(String(result.status)) ||
+        !("totalAmount" in result) || typeof result.totalAmount !== "number"
       ) {
         throw new Error("Máy chủ trả về thông tin đơn hàng không hợp lệ.");
       }
-
-      clearCart();
-      setCheckoutNotice(
-        `Tạo đơn thành công: ${result.orderCode} · Trạng thái: ${result.status}.`,
-      );
+      setCurrentOrderCode(result.orderCode);
+      setConfirmedTotal(result.totalAmount);
+      onOrderCreated();
+      if (result.status === "PAID") {
+        clearCart();
+        router.push(`/payment/result?orderCode=${encodeURIComponent(result.orderCode)}`);
+        return;
+      }
+      setCheckoutNotice(`Tạo đơn thành công: ${result.orderCode}. Vui lòng thanh toán.`);
+      // Keep the cart until payment is completed or explicitly handled.
     } catch (error) {
       setCheckoutNotice(
         error instanceof Error
@@ -177,6 +281,73 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       setIsSubmittingOrder(false);
     }
   };
+
+  const handlePayment = async () => {
+  if (!currentOrderCode || isSubmittingPayment) return;
+
+  setIsSubmittingPayment(true);
+  setCheckoutNotice(null);
+
+  try {
+    const token = localStorage.getItem("brewlite_access_token");
+
+    if (!token) {
+      throw new Error("Vui lòng đăng nhập trước khi thanh toán.");
+    }
+
+    const response = await fetch(`${API_URL}/payments`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": checkoutKey("payment", currentOrderCode),
+      },
+      body: JSON.stringify({
+        orderCode: currentOrderCode,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.message || "Không thể khởi tạo thanh toán."
+      );
+    }
+
+    if (
+      !data.checkoutUrl ||
+      !data.formFields ||
+      typeof data.formFields !== "object"
+    ) {
+      throw new Error("Dữ liệu thanh toán từ server không hợp lệ.");
+    }
+
+    // Tạo form POST theo các trường do SDK SePay trả về.
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = data.checkoutUrl;
+
+    for (const [key, value] of Object.entries(data.formFields)) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = key;
+      input.value = String(value ?? "");
+      form.appendChild(input);
+    }
+
+    document.body.appendChild(form);
+    form.submit();
+  } catch (error) {
+    setCheckoutNotice(
+      error instanceof Error
+        ? error.message
+        : "Đã xảy ra lỗi khi khởi tạo thanh toán."
+    );
+    setIsSubmittingPayment(false);
+  }
+};
+
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-center">
@@ -194,13 +365,16 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       >
         <header className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
           <div>
-            <h2 id="cart-title" className="text-lg font-extrabold text-stone-900">
+            <h2
+              id="cart-title"
+              className="text-lg font-extrabold text-stone-900"
+            >
               Giỏ hàng
             </h2>
             <p className="text-xs text-stone-500">{totalItemsCount} món</p>
           </div>
           <div className="flex items-center gap-2">
-            {items.length > 0 && (
+            {items.length > 0 && !currentOrderCode && (
               <button
                 type="button"
                 onClick={handleClearCart}
@@ -264,7 +438,8 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                     </div>
                     <button
                       type="button"
-                      onClick={() => removeFromCart(item.cartItemId)}
+                      onClick={() => { if (!currentOrderCode) removeFromCart(item.cartItemId); }}
+                      disabled={Boolean(currentOrderCode)}
                       aria-label={`Xóa ${item.name} khỏi giỏ`}
                       className="shrink-0 rounded-lg p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-700"
                     >
@@ -287,7 +462,16 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                       cartItemId={item.cartItemId}
                       quantity={item.quantity}
                       name={item.name}
-                      updateQuantity={updateQuantity}
+                      quantityInput={quantityInputFor(item)}
+                      maxQuantity={maxQuantityFor(item)}
+                      disabled={Boolean(currentOrderCode) || isSubmittingOrder}
+                      onInputChange={(value) => {
+                        const invalid = Boolean(getQuantityError(value, maxQuantityFor(item)));
+                        const nextQuantity = invalid ? item.quantity : Number(value);
+                        setQuantityInputs((current) => ({ ...current, [item.cartItemId]: { quantity: nextQuantity, value } }));
+                        if (!invalid) updateQuantity(item.cartItemId, nextQuantity);
+                      }}
+                      onRemove={() => removeFromCart(item.cartItemId)}
                     />
                     <span className="text-sm font-extrabold text-emerald-900">
                       {formatPriceVND(item.price * item.quantity)}
@@ -299,33 +483,115 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
           )}
         </div>
 
-        {checkoutNotice && (
-          <p
-            role="status"
-            className="mx-4 mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900"
-          >
-            {checkoutNotice}
-          </p>
-        )}
+       {checkoutNotice && (
+  <p
+    role="status"
+    className="mx-4 mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900"
+  >
+    {checkoutNotice}
+  </p>
+)}
 
         {items.length > 0 && (
           <footer className="space-y-3 border-t border-stone-200 bg-white/80 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            {!currentOrderCode && (
+              <PromotionInput
+                key={cartKey}
+                code={promotionCode}
+                orderAmount={totalAmount}
+                quote={appliedPromotion}
+                disabled={isSubmittingOrder}
+                onCodeChange={(code) => {
+                  setPromotionCode(code);
+                  setPromotionSelection(null);
+                }}
+                onApply={(quote) => setPromotionSelection({ cartItems: items, quote })}
+                onPendingChange={setIsValidatingPromotion}
+              />
+            )}
+            {!currentOrderCode && (
+              <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                <div className="flex items-center justify-between text-sm">
+                  <label htmlFor="reward-points" className="font-semibold text-emerald-950">Dùng điểm thưởng</label>
+                  <span className="text-emerald-800">{account?.loyaltyPoints.toLocaleString("vi-VN") ?? "—"} điểm</span>
+                </div>
+                <div className="flex gap-2">
+                  <input id="reward-points" type="number" inputMode="numeric" min={0} max={maxPoints} step={1}
+                    value={pointsToRedeem}
+                    disabled={!account || isSubmittingOrder}
+                    onChange={(event) => {
+                      const points = Number(event.target.value);
+                      if (Number.isSafeInteger(points) && points >= 0) {
+                        setPointsSelection({ cartItems: items, promotionCode: appliedPromotion?.code, points });
+                      }
+                    }}
+                    aria-invalid={invalidPoints}
+                    className="min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900"
+                  />
+                  <button type="button" disabled={!account || isSubmittingOrder}
+                    onClick={() => setPointsSelection({ cartItems: items, promotionCode: appliedPromotion?.code, points: maxPoints })}
+                    className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-900 disabled:opacity-50">Dùng tối đa</button>
+                </div>
+                <p className="text-xs text-stone-600">1 điểm = {formatPriceVND(pointValue)}. Điểm được trừ khi tạo đơn và hoàn lại khi hủy đơn.</p>
+                {pointsError && <p role="status" className="text-xs text-amber-800">{pointsError}</p>}
+                {invalidPoints && <p role="alert" className="text-xs text-rose-700">Chỉ có thể dùng tối đa {maxPoints.toLocaleString("vi-VN")} điểm cho đơn này.</p>}
+              </div>
+            )}
+            {appliedPromotion && (
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between text-stone-600">
+                  <span>Tạm tính</span>
+                  <span>{formatPriceVND(totalAmount)}</span>
+                </div>
+                <div className="flex justify-between text-emerald-800">
+                  <span>Giảm giá ({appliedPromotion.code})</span>
+                  <span>−{formatPriceVND(appliedPromotion.discountAmount)}</span>
+                </div>
+              </div>
+            )}
+            {pointsToRedeem > 0 && (
+              <div className="flex justify-between text-sm text-emerald-800">
+                <span>Giảm từ {pointsToRedeem.toLocaleString("vi-VN")} điểm</span>
+                <span>−{formatPriceVND(pointsDiscount)}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-stone-600">
-                Tổng thanh toán
-              </span>
+              <span className="text-sm font-semibold text-stone-600">Tổng thanh toán</span>
               <span className="text-lg font-extrabold text-emerald-950">
-                {formatPriceVND(totalAmount)}
+                {formatPriceVND(payableAmount)}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={handleCreateOrder}
-              disabled={isSubmittingOrder}
-              className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-emerald-950/15 transition-colors hover:bg-emerald-900 disabled:cursor-wait disabled:opacity-70"
-            >
-              {isSubmittingOrder ? 'Đang tạo đơn...' : 'Tiến hành đặt hàng'}
-            </button>
+            {account && <p className="text-xs text-stone-500">Nhận {Math.floor(payableAmount / account.loyaltyPolicy.spendPerPoint).toLocaleString("vi-VN")} điểm sau khi thanh toán thành công.</p>}
+            {!currentOrderCode ? (
+              <>
+                {invalidQuantities && (
+                  <p role="alert" className="text-xs text-rose-700">
+                    Vui lòng sửa số lượng vượt tồn kho hoặc không hợp lệ trước khi đặt hàng.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCreateOrder}
+                  disabled={isSubmittingOrder || isValidatingPromotion || invalidPoints || invalidQuantities}
+                  className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white disabled:opacity-70"
+                >
+                  {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}
+                </button>
+              </>
+            ) : (
+              <div className="space-y-3 rounded-2xl border border-stone-200 p-3">
+                <h3 className="font-bold text-stone-900">Thanh toán đơn hàng</h3>
+                <p className="text-sm">Mã đơn hàng: <strong>{currentOrderCode}</strong></p>
+                <button
+                  type="button"
+                  onClick={handlePayment}
+                  disabled={isSubmittingPayment}
+                  className="w-full rounded-lg bg-amber-600 px-4 py-3 font-semibold text-white disabled:opacity-50"
+                >
+                  {isSubmittingPayment ? "Đang chuyển đến SePay..." : "Thanh toán với SePay Sandbox"}
+                </button>
+              </div>
+            )}
           </footer>
         )}
       </section>

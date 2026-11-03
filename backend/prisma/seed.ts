@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PRODUCTS } from '../src/products/products.data.js';
+import { seedPromotions } from './promotions.seed.js';
 
 const prisma = new PrismaClient();
 
@@ -23,6 +24,7 @@ async function main() {
   }
 
   console.log(`Seeded ${products.length} products successfully!`);
+  await seedPromotions(prisma);
 }
 
 main()
