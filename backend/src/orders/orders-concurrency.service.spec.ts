@@ -1,61 +1,87 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
-import { vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { PromotionsService } from '../promotions/promotions.service.js';
 import { OrderSizeId } from './order.types.js';
 import { OrdersService } from './orders.service.js';
 
-describe('Optimistic inventory locking', () => {
-  let stock: number;
+describe('Optimistic ingredient inventory locking', () => {
+  let stock: Prisma.Decimal;
   let stockVersion: number;
   const findProducts = vi.fn();
+  const findToppingRecipes = vi.fn();
+  const findIngredients = vi.fn();
   const updateStock = vi.fn();
   const createOrder = vi.fn();
   const transaction = vi.fn();
   const tx = {
-    product: { findMany: findProducts, updateMany: updateStock },
+    product: { findMany: findProducts },
+    toppingRecipeIngredient: { findMany: findToppingRecipes },
+    ingredient: { findMany: findIngredients, updateMany: updateStock },
     order: { create: createOrder },
   };
-  const product = () => ({
-    id: 'coffee',
-    name: 'Coffee',
-    price: { toNumber: () => 25000 },
+  const ingredient = () => ({
+    id: 'coffee-beans',
+    name: 'Coffee beans',
+    unit: 'g',
     stock,
     stockVersion,
   });
-  const items = (quantity = 1) => [
-    {
-      productId: 'coffee',
-      quantity,
-      sizeId: OrderSizeId.Small,
-      toppingIds: [],
-    },
+  const product = () => ({
+    id: 'coffee',
+    name: 'Coffee',
+    price: new Prisma.Decimal(25000),
+    recipeIngredients: [
+      {
+        sizeId: 'S',
+        ingredientId: 'coffee-beans',
+        quantity: new Prisma.Decimal(1),
+        ingredient: { id: 'coffee-beans', name: 'Coffee beans', unit: 'g' },
+      },
+      {
+        sizeId: 'M',
+        ingredientId: 'coffee-beans',
+        quantity: new Prisma.Decimal(2),
+        ingredient: { id: 'coffee-beans', name: 'Coffee beans', unit: 'g' },
+      },
+      {
+        sizeId: 'L',
+        ingredientId: 'coffee-beans',
+        quantity: new Prisma.Decimal(3),
+        ingredient: { id: 'coffee-beans', name: 'Coffee beans', unit: 'g' },
+      },
+    ],
+  });
+  const items = (quantity = 1, sizeId: OrderSizeId = OrderSizeId.Small) => [
+    { productId: 'coffee', quantity, sizeId, toppingIds: [] },
   ];
   let service: OrdersService;
 
   beforeEach(() => {
     vi.resetAllMocks();
-    stock = 10;
+    stock = new Prisma.Decimal(10);
     stockVersion = 0;
     findProducts.mockImplementation(() => Promise.resolve([product()]));
-    // Simulate a database compare-and-swap; real transaction rollback is covered
-    // separately by the PostgreSQL integration suite.
+    findToppingRecipes.mockResolvedValue([]);
+    findIngredients.mockImplementation(() => Promise.resolve([ingredient()]));
     updateStock.mockImplementation(
       ({
         where,
         data,
       }: {
-        where: { stockVersion: number; stock: { gte: number } };
+        where: { stockVersion: number; stock: { gte: Prisma.Decimal } };
         data: {
-          stock: { decrement: number };
+          stock: { decrement: Prisma.Decimal };
           stockVersion: { increment: number };
         };
       }) => {
-        if (where.stockVersion !== stockVersion || stock < where.stock.gte) {
+        if (
+          where.stockVersion !== stockVersion ||
+          stock.lessThan(where.stock.gte)
+        ) {
           return Promise.resolve({ count: 0 });
         }
-        stock -= data.stock.decrement;
+        stock = stock.minus(data.stock.decrement);
         stockVersion += data.stockVersion.increment;
         return Promise.resolve({ count: 1 });
       },
@@ -79,9 +105,9 @@ describe('Optimistic inventory locking', () => {
     { initial: 1, quantity: 1 },
     { initial: 5, quantity: 2 },
   ])(
-    'does not oversell stock=$initial when competing orders request quantity=$quantity',
+    'does not oversell ingredient stock=$initial when orders compete for quantity=$quantity',
     async ({ initial, quantity }) => {
-      stock = initial;
+      stock = new Prisma.Decimal(initial);
       const results = await Promise.allSettled(
         Array.from({ length: 8 }, () =>
           service.create({ items: items(quantity) }),
@@ -95,12 +121,29 @@ describe('Optimistic inventory locking', () => {
       expect(rejected).toHaveLength(8 - accepted.length);
       for (const result of rejected)
         expect(result.reason).toBeInstanceOf(BadRequestException);
-      expect(stock).toBe(initial - accepted.length * quantity);
-      expect(stock).toBeGreaterThanOrEqual(0);
+      expect(stock.toNumber()).toBe(initial - accepted.length * quantity);
+      expect(stock.greaterThanOrEqualTo(0)).toBe(true);
       expect(stockVersion).toBe(accepted.length);
       expect(createOrder).toHaveBeenCalledTimes(accepted.length);
     },
   );
+
+  it('deducts the size-specific recipe amount rather than one unit per drink', async () => {
+    stock = new Prisma.Decimal(10);
+    await service.create({ items: items(2, OrderSizeId.Large) });
+    expect(stock.toNumber()).toBe(4);
+    expect(updateStock).toHaveBeenCalledWith({
+      where: {
+        id: 'coffee-beans',
+        stockVersion: 0,
+        stock: { gte: new Prisma.Decimal(6) },
+      },
+      data: {
+        stock: { decrement: new Prisma.Decimal(6) },
+        stockVersion: { increment: 1 },
+      },
+    });
+  });
 
   it('rereads inventory in a new transaction after a version conflict and succeeds if stock remains', async () => {
     updateStock.mockImplementationOnce(() => {
@@ -112,10 +155,17 @@ describe('Optimistic inventory locking', () => {
     expect(transaction).toHaveBeenCalledTimes(2);
     expect(findProducts).toHaveBeenCalledTimes(2);
     expect(updateStock).toHaveBeenLastCalledWith({
-      where: { id: 'coffee', stockVersion: 1, stock: { gte: 2 } },
-      data: { stock: { decrement: 2 }, stockVersion: { increment: 1 } },
+      where: {
+        id: 'coffee-beans',
+        stockVersion: 1,
+        stock: { gte: new Prisma.Decimal(2) },
+      },
+      data: {
+        stock: { decrement: new Prisma.Decimal(2) },
+        stockVersion: { increment: 1 },
+      },
     });
-    expect(stock).toBe(8);
+    expect(stock.toNumber()).toBe(8);
     expect(stockVersion).toBe(2);
     expect(createOrder).toHaveBeenCalledOnce();
   });
@@ -127,11 +177,11 @@ describe('Optimistic inventory locking', () => {
     );
     expect(transaction).toHaveBeenCalledTimes(5);
     expect(createOrder).not.toHaveBeenCalled();
-    expect(stock).toBe(10);
+    expect(stock.toNumber()).toBe(10);
   });
 
   it('propagates unrelated database errors without retrying the transaction', async () => {
-    updateStock.mockRejectedValue(new Error('Database unavailable'));
+    findIngredients.mockRejectedValue(new Error('Database unavailable'));
     await expect(service.create({ items: items() })).rejects.toThrow(
       'Database unavailable',
     );

@@ -8,12 +8,17 @@ import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
 import { PRODUCTS } from './../src/products/products.data.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
+import {
+  createTestProduct,
+  deleteTestProduct,
+} from './helpers/ingredient-inventory.js';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
   let createdOrderCodes: string[];
   const checkoutProductId = `checkout-test-${randomUUID()}`;
   const userId = `checkout-user-${randomUUID()}`;
+  let inventoryIds: string[] | undefined;
   let token: string;
 
   beforeEach(async () => {
@@ -79,19 +84,26 @@ describe('AppController (e2e)', () => {
         price: expect.any(Number),
         imageUrl: expect.any(String),
         stock: expect.any(Number),
+        stockBySize: {
+          S: expect.any(Number),
+          M: expect.any(Number),
+          L: expect.any(Number),
+        },
       });
     }
   });
 
   it('/orders (POST) creates a pending order and calculates prices', async () => {
-    await app.get(PrismaService).product.create({
-      data: {
-        id: checkoutProductId,
-        name: 'Cà phê sữa',
-        price: 35000,
-        stock: 2,
-      },
+    const inventory = await createTestProduct(app.get(PrismaService), {
+      id: checkoutProductId,
+      name: 'Cà phê sữa',
+      price: 35000,
+      stock: 2,
     });
+    inventoryIds = [
+      inventory.baseIngredientId,
+      inventory.toppingIngredientId,
+    ];
     const response = await request(app.getHttpServer())
       .post('/orders')
       .auth(token, { type: 'bearer' })
@@ -133,7 +145,11 @@ describe('AppController (e2e)', () => {
       .expect(200);
     expect(menu.body).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: checkoutProductId, stock: 0 }),
+        expect.objectContaining({
+          id: checkoutProductId,
+          stock: 0,
+          stockBySize: { S: 0, M: 0, L: 0 },
+        }),
       ]),
     );
   });
@@ -218,9 +234,14 @@ describe('AppController (e2e)', () => {
           where: { id: { in: createdOrderCodes } },
         });
       }
-      await app.get(PrismaService).product.deleteMany({
-        where: { id: checkoutProductId },
-      });
+      if (inventoryIds) {
+        await deleteTestProduct(
+          app.get(PrismaService),
+          checkoutProductId,
+          inventoryIds,
+        );
+        inventoryIds = undefined;
+      }
       await app.get(PrismaService).user.deleteMany({ where: { id: userId } });
     } finally {
       await app.close();

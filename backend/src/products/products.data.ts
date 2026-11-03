@@ -1,6 +1,6 @@
 import type { Product } from './product.type.js';
 
-export const PRODUCTS: Omit<Product, 'stock'>[] = [
+export const PRODUCTS: Omit<Product, 'stock' | 'stockBySize'>[] = [
   {
     id: 'coffee-milk',
     name: 'Cà phê sữa',
@@ -71,4 +71,91 @@ export const PRODUCTS: Omit<Product, 'stock'>[] = [
     imageUrl:
       'https://i.vietgiaitri.com/2021/7/24/2-cach-lam-tra-dua-luoi-tuoi-mat-thanh-nhiet-uong-vao-cuc-sang-khoai-136-5911023.jpg',
   },
+];
+
+export interface IngredientSeed {
+  id: string;
+  name: string;
+  unit: 'g' | 'ml' | 'unit';
+  stock: number;
+}
+
+export interface ProductRecipeSeed {
+  productId: string;
+  sizeId: 'S' | 'M' | 'L';
+  ingredientId: string;
+  quantity: number;
+}
+
+export interface ToppingRecipeSeed {
+  toppingId: string;
+  ingredientId: string;
+  quantity: number;
+}
+
+export const INGREDIENTS: IngredientSeed[] = [
+  { id: 'coffee-beans', name: 'Hạt cà phê', unit: 'g', stock: 5000 },
+  { id: 'fresh-milk', name: 'Sữa tươi', unit: 'ml', stock: 20000 },
+  { id: 'water', name: 'Nước', unit: 'ml', stock: 100000 },
+  { id: 'tea-leaves', name: 'Trà', unit: 'g', stock: 3000 },
+  { id: 'peach-syrup', name: 'Siro đào', unit: 'ml', stock: 5000 },
+  { id: 'lotus-seeds', name: 'Hạt sen', unit: 'g', stock: 3000 },
+  { id: 'milk-tea-powder', name: 'Bột trà sữa', unit: 'g', stock: 5000 },
+  { id: 'blueberry-syrup', name: 'Siro việt quất', unit: 'ml', stock: 5000 },
+  { id: 'soda-water', name: 'Nước soda', unit: 'ml', stock: 20000 },
+  { id: 'matcha-powder', name: 'Bột matcha', unit: 'g', stock: 3000 },
+  { id: 'strawberry-syrup', name: 'Siro dâu', unit: 'ml', stock: 5000 },
+  { id: 'melon-syrup', name: 'Siro dưa lưới', unit: 'ml', stock: 5000 },
+  { id: 'white-pearls', name: 'Trân châu trắng', unit: 'g', stock: 5000 },
+  { id: 'aloe-vera', name: 'Thạch nha đam', unit: 'g', stock: 5000 },
+  { id: 'cheese-foam', name: 'Kem cheese', unit: 'g', stock: 5000 },
+];
+
+const sizes = ['S', 'M', 'L'] as const;
+
+function recipe(
+  productId: string,
+  ingredientId: string,
+  quantities: readonly [number, number, number],
+): ProductRecipeSeed[] {
+  return sizes.map((sizeId, index) => ({
+    productId,
+    sizeId,
+    ingredientId,
+    quantity: quantities[index],
+  }));
+}
+
+export const PRODUCT_RECIPES: ProductRecipeSeed[] = [
+  ...recipe('coffee-milk', 'coffee-beans', [18, 22, 26]),
+  ...recipe('coffee-milk', 'fresh-milk', [80, 100, 120]),
+  ...recipe('americano', 'coffee-beans', [18, 22, 26]),
+  ...recipe('americano', 'water', [150, 200, 250]),
+  ...recipe('cappuccino', 'coffee-beans', [18, 22, 26]),
+  ...recipe('cappuccino', 'fresh-milk', [120, 150, 180]),
+  ...recipe('peach-tea', 'tea-leaves', [3, 4, 5]),
+  ...recipe('peach-tea', 'water', [180, 230, 280]),
+  ...recipe('peach-tea', 'peach-syrup', [20, 30, 40]),
+  ...recipe('lotus-seed-tea', 'tea-leaves', [3, 4, 5]),
+  ...recipe('lotus-seed-tea', 'water', [180, 230, 280]),
+  ...recipe('lotus-seed-tea', 'lotus-seeds', [20, 30, 40]),
+  ...recipe('Milk-tea', 'tea-leaves', [2, 3, 4]),
+  ...recipe('Milk-tea', 'milk-tea-powder', [25, 32, 40]),
+  ...recipe('Milk-tea', 'fresh-milk', [80, 100, 120]),
+  ...recipe('blueberry-soda', 'soda-water', [200, 250, 300]),
+  ...recipe('blueberry-soda', 'blueberry-syrup', [25, 32, 40]),
+  ...recipe('Matcha-latte', 'matcha-powder', [4, 5, 6]),
+  ...recipe('Matcha-latte', 'fresh-milk', [150, 200, 250]),
+  ...recipe('strawberry-tea', 'tea-leaves', [3, 4, 5]),
+  ...recipe('strawberry-tea', 'water', [180, 230, 280]),
+  ...recipe('strawberry-tea', 'strawberry-syrup', [20, 30, 40]),
+  ...recipe('cantaloupe-tea', 'tea-leaves', [3, 4, 5]),
+  ...recipe('cantaloupe-tea', 'water', [180, 230, 280]),
+  ...recipe('cantaloupe-tea', 'melon-syrup', [20, 30, 40]),
+];
+
+export const TOPPING_RECIPES: ToppingRecipeSeed[] = [
+  { toppingId: 'white_pearl', ingredientId: 'white-pearls', quantity: 30 },
+  { toppingId: 'aloe_vera', ingredientId: 'aloe-vera', quantity: 30 },
+  { toppingId: 'cheese', ingredientId: 'cheese-foam', quantity: 40 },
 ];

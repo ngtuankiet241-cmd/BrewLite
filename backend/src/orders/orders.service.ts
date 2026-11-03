@@ -146,25 +146,108 @@ export class OrdersService {
     const productIds = [...new Set(dto.items.map((item) => item.productId))];
     const products = await transaction.product.findMany({
       where: { id: { in: productIds } },
-      select: {
-        id: true,
-        name: true,
-        price: true,
-        stock: true,
-        stockVersion: true,
+      include: {
+        recipeIngredients: {
+          select: {
+            sizeId: true,
+            quantity: true,
+            ingredient: { select: { id: true, name: true, unit: true } },
+          },
+        },
       },
     });
     const productsById = new Map(
       products.map((product) => [product.id, product]),
     );
+    const toppingIds = [
+      ...new Set(dto.items.flatMap((item) => item.toppingIds)),
+    ];
+    const toppingRecipes = await transaction.toppingRecipeIngredient.findMany({
+      where: { toppingId: { in: toppingIds } },
+      include: {
+        ingredient: { select: { id: true, name: true, unit: true } },
+      },
+    });
+    const toppingRecipesById = new Map<string, typeof toppingRecipes>();
+    for (const recipe of toppingRecipes) {
+      toppingRecipesById.set(recipe.toppingId, [
+        ...(toppingRecipesById.get(recipe.toppingId) ?? []),
+        recipe,
+      ]);
+    }
 
-    const items: OrderItem[] = dto.items.map((item) => {
+    const ingredientConsumptionByItem: Array<
+      Array<{ ingredientId: string; name: string; unit: string; quantity: number }>
+    > = [];
+    const requiredIngredients = new Map<
+      string,
+      { name: string; unit: string; quantity: Prisma.Decimal }
+    >();
+
+    const items: OrderItem[] = dto.items.map((item, itemIndex) => {
       const product = productsById.get(item.productId);
       if (!product) {
         throw new NotFoundException(
           `Sản phẩm không tồn tại: ${item.productId}`,
         );
       }
+      const baseRecipe = product.recipeIngredients.filter(
+        (recipe) => recipe.sizeId === item.sizeId,
+      );
+      if (baseRecipe.length === 0) {
+        throw new BadRequestException(
+          `Chưa có định mức nguyên liệu cho ${product.name} size ${item.sizeId}.`,
+        );
+      }
+
+      const itemIngredients = new Map<
+        string,
+        { name: string; unit: string; quantity: Prisma.Decimal }
+      >();
+      const addIngredient = (
+        ingredient: { id: string; name: string; unit: string },
+        quantity: Prisma.Decimal,
+      ) => {
+        const existing = itemIngredients.get(ingredient.id);
+        itemIngredients.set(ingredient.id, {
+          name: ingredient.name,
+          unit: ingredient.unit,
+          quantity: (existing?.quantity ?? new Prisma.Decimal(0)).plus(quantity),
+        });
+      };
+      for (const recipe of baseRecipe) {
+        addIngredient(recipe.ingredient, recipe.quantity.mul(item.quantity));
+      }
+      for (const toppingId of item.toppingIds) {
+        const recipes = toppingRecipesById.get(toppingId);
+        if (!recipes?.length) {
+          throw new BadRequestException(
+            `Chưa có định mức nguyên liệu cho topping ${TOPPINGS[toppingId].name}.`,
+          );
+        }
+        for (const recipe of recipes) {
+          addIngredient(recipe.ingredient, recipe.quantity.mul(item.quantity));
+        }
+      }
+      ingredientConsumptionByItem[itemIndex] = [...itemIngredients].map(
+        ([ingredientId, ingredient]) => ({
+          ingredientId,
+          name: ingredient.name,
+          unit: ingredient.unit,
+          quantity: ingredient.quantity.toNumber(),
+        }),
+      );
+      for (const [ingredientId, ingredient] of itemIngredients) {
+        const existing = requiredIngredients.get(ingredientId);
+        requiredIngredients.set(ingredientId, {
+          name: ingredient.name,
+          unit: ingredient.unit,
+          quantity: (existing?.quantity ?? new Prisma.Decimal(0)).plus(
+            ingredient.quantity,
+          ),
+        });
+      }
+
       const size = { id: item.sizeId, ...SIZES[item.sizeId] };
       const toppings = item.toppingIds.map((id) => ({ id, ...TOPPINGS[id] }));
       const basePrice = product.price.toNumber();
@@ -195,37 +278,38 @@ export class OrdersService {
       throw new BadRequestException('Tổng tiền đơn hàng vượt giới hạn hợp lệ.');
     }
 
-    const quantitiesByProduct = new Map<string, number>();
-    for (const item of items) {
-      const quantity =
-        (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity;
-      if (!Number.isSafeInteger(quantity) || quantity > 2_147_483_647) {
-        throw new BadRequestException(
-          `Sản phẩm không đủ tồn kho: ${item.productName}`,
-        );
-      }
-      quantitiesByProduct.set(item.productId, quantity);
-    }
-
     const orderCode = `ORD-${randomUUID()}`;
     const persist = async (tx: Prisma.TransactionClient): Promise<Order> => {
-      // Acquire product rows in a consistent order for carts with reversed items.
-      for (const productId of [...quantitiesByProduct.keys()].sort()) {
-        const quantity = quantitiesByProduct.get(productId)!;
-        const product = productsById.get(productId)!;
-        if (product.stock < quantity) {
+      const inventory = await tx.ingredient.findMany({
+        where: { id: { in: [...requiredIngredients.keys()] } },
+        select: { id: true, name: true, unit: true, stock: true, stockVersion: true },
+      });
+      const inventoryById = new Map(
+        inventory.map((ingredient) => [ingredient.id, ingredient]),
+      );
+
+      // Acquire ingredient rows in a consistent order to avoid deadlocks.
+      for (const ingredientId of [...requiredIngredients.keys()].sort()) {
+        const required = requiredIngredients.get(ingredientId)!;
+        const ingredient = inventoryById.get(ingredientId);
+        if (!ingredient) {
           throw new BadRequestException(
-            `Sản phẩm không đủ tồn kho: ${product.name}`,
+            `Không tìm thấy nguyên liệu: ${required.name}.`,
           );
         }
-        const result = await tx.product.updateMany({
+        if (ingredient.stock.lessThan(required.quantity)) {
+          throw new BadRequestException(
+            `Không đủ nguyên liệu ${required.name} (${required.unit}) trong kho.`,
+          );
+        }
+        const result = await tx.ingredient.updateMany({
           where: {
-            id: productId,
-            stockVersion: product.stockVersion,
-            stock: { gte: quantity },
+            id: ingredientId,
+            stockVersion: ingredient.stockVersion,
+            stock: { gte: required.quantity },
           },
           data: {
-            stock: { decrement: quantity },
+            stock: { decrement: required.quantity },
             stockVersion: { increment: 1 },
           },
         });
@@ -258,7 +342,7 @@ export class OrdersService {
             : {}),
           total: payableAmount,
           items: {
-            create: items.map((item) => ({
+            create: items.map((item, itemIndex) => ({
               productId: item.productId,
               size: item.size.id,
               qty: item.quantity,
@@ -271,6 +355,7 @@ export class OrdersService {
                 ...item,
                 size: { ...item.size },
                 toppings: item.toppings.map((topping) => ({ ...topping })),
+                ingredientsUsed: ingredientConsumptionByItem[itemIndex],
               } as Prisma.InputJsonValue,
             })),
           },

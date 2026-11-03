@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { API_URL } from "../lib/account";
 
 type AuthMode = "login" | "register";
 
@@ -16,8 +17,6 @@ type AuthModalProps = {
   onClose: () => void;
   onLoginSuccess: (user: AuthUser, token: string) => void;
 };
-
-const API_URL = "http://localhost:3001/auth";
 
 export default function AuthModal({
   onClose,
@@ -73,7 +72,7 @@ export default function AuthModal({
 
     try {
       const response = await fetch(
-        `${API_URL}/${mode === "login" ? "login" : "register"}`,
+        `${API_URL}/auth/${mode === "login" ? "login" : "register"}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

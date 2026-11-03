@@ -3,7 +3,7 @@ import {
   NotFoundException,
   ValidationPipe,
 } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PromotionsService } from '../promotions/promotions.service.js';
@@ -13,13 +13,20 @@ import { OrdersService } from './orders.service.js';
 
 describe('Persistent order creation', () => {
   const findProducts = vi.fn();
-  const decrementStock = vi.fn();
+  const findToppingRecipes = vi.fn();
+  const findIngredients = vi.fn();
+  const decrementIngredient = vi.fn();
   const createOrder = vi.fn();
   const consume = vi.fn();
   const transaction = vi.fn();
   const tx = {
     order: { create: createOrder },
-    product: { findMany: findProducts, updateMany: decrementStock },
+    product: { findMany: findProducts },
+    toppingRecipeIngredient: { findMany: findToppingRecipes },
+    ingredient: {
+      findMany: findIngredients,
+      updateMany: decrementIngredient,
+    },
   };
   const items = [
     {
@@ -33,13 +40,55 @@ describe('Persistent order creation', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
-    decrementStock.mockResolvedValue({ count: 1 });
+    decrementIngredient.mockResolvedValue({ count: 1 });
     findProducts.mockResolvedValue([
       {
         id: 'coffee',
         name: 'Cà phê',
         price: { toNumber: () => 35000 },
-        stock: 100,
+        recipeIngredients: [
+          {
+            sizeId: 'S',
+            quantity: new Prisma.Decimal(1),
+            ingredientId: 'coffee-beans',
+            ingredient: { id: 'coffee-beans', name: 'Cà phê', unit: 'g' },
+          },
+          {
+            sizeId: 'M',
+            quantity: new Prisma.Decimal(2),
+            ingredientId: 'coffee-beans',
+            ingredient: { id: 'coffee-beans', name: 'Cà phê', unit: 'g' },
+          },
+          {
+            sizeId: 'L',
+            quantity: new Prisma.Decimal(3),
+            ingredientId: 'coffee-beans',
+            ingredient: { id: 'coffee-beans', name: 'Cà phê', unit: 'g' },
+          },
+        ],
+      },
+    ]);
+    findToppingRecipes.mockResolvedValue([
+      {
+        toppingId: 'cheese',
+        ingredientId: 'milk',
+        quantity: new Prisma.Decimal(4),
+        ingredient: { id: 'milk', name: 'Sữa', unit: 'ml' },
+      },
+    ]);
+    findIngredients.mockResolvedValue([
+      {
+        id: 'coffee-beans',
+        name: 'Cà phê',
+        unit: 'g',
+        stock: new Prisma.Decimal(100),
+        stockVersion: 0,
+      },
+      {
+        id: 'milk',
+        name: 'Sữa',
+        unit: 'ml',
+        stock: new Prisma.Decimal(100),
         stockVersion: 0,
       },
     ]);
@@ -95,7 +144,21 @@ describe('Persistent order creation', () => {
               ],
               unitPrice: 50000,
               lineTotal: 100000,
-              snapshot: result.items[0],
+              snapshot: expect.objectContaining({
+                ...result.items[0],
+                ingredientsUsed: expect.arrayContaining([
+                  expect.objectContaining({
+                    ingredientId: 'coffee-beans',
+                    quantity: 4,
+                    unit: 'g',
+                  }),
+                  expect.objectContaining({
+                    ingredientId: 'milk',
+                    quantity: 8,
+                    unit: 'ml',
+                  }),
+                ]),
+              }),
             },
           ],
         },
@@ -140,34 +203,61 @@ describe('Persistent order creation', () => {
         },
       ],
     });
-    expect(decrementStock).toHaveBeenCalledExactlyOnceWith({
-      where: { id: 'coffee', stockVersion: 0, stock: { gte: 5 } },
-      data: { stock: { decrement: 5 }, stockVersion: { increment: 1 } },
+    expect(decrementIngredient).toHaveBeenCalledTimes(2);
+    expect(decrementIngredient).toHaveBeenCalledWith({
+      where: {
+        id: 'coffee-beans',
+        stockVersion: 0,
+        stock: { gte: new Prisma.Decimal(7) },
+      },
+      data: {
+        stock: { decrement: new Prisma.Decimal(7) },
+        stockVersion: { increment: 1 },
+      },
     });
     expect(result.items).toHaveLength(2);
   });
 
   it('rejects insufficient inventory without saving an order or consuming a promotion', async () => {
-    findProducts.mockResolvedValue([
+    findIngredients.mockResolvedValue([
       {
-        id: 'coffee',
+        id: 'coffee-beans',
         name: 'Cà phê',
-        price: { toNumber: () => 35000 },
-        stock: 1,
+        unit: 'g',
+        stock: new Prisma.Decimal(2),
+        stockVersion: 0,
+      },
+      {
+        id: 'milk',
+        name: 'Sữa',
+        unit: 'ml',
+        stock: new Prisma.Decimal(100),
         stockVersion: 0,
       },
     ]);
     await expect(
       service.create({ items, promotionCode: 'BREW10' }),
-    ).rejects.toThrow('Sản phẩm không đủ tồn kho: Cà phê');
+    ).rejects.toThrow('Không đủ nguyên liệu Cà phê (g) trong kho.');
     expect(createOrder).not.toHaveBeenCalled();
     expect(consume).not.toHaveBeenCalled();
-    expect(decrementStock).not.toHaveBeenCalled();
+    expect(decrementIngredient).not.toHaveBeenCalled();
   });
 
   it('rejects a combined quantity larger than the inventory INTEGER range', async () => {
     findProducts.mockResolvedValue([
-      { id: 'coffee', name: 'Cà phê', price: { toNumber: () => 0 } },
+      {
+        id: 'coffee',
+        name: 'Cà phê',
+        price: { toNumber: () => 0 },
+        recipeIngredients: [
+          {
+            sizeId: 'S',
+            quantity: new Prisma.Decimal(1),
+            ingredientId: 'coffee-beans',
+            ingredient: { id: 'coffee-beans', name: 'Cà phê', unit: 'g' },
+          },
+        ],
+      },
     ]);
     const freeItem = {
       ...items[0],
@@ -177,8 +267,8 @@ describe('Persistent order creation', () => {
     };
     await expect(
       service.create({ items: [freeItem, { ...freeItem, quantity: 1 }] }),
-    ).rejects.toThrow('không đủ tồn kho');
-    expect(decrementStock).not.toHaveBeenCalled();
+    ).rejects.toThrow('Không đủ nguyên liệu Cà phê (g) trong kho.');
+    expect(decrementIngredient).not.toHaveBeenCalled();
   });
 
   it('propagates a database failure instead of returning a successful order', async () => {
@@ -203,7 +293,7 @@ describe('Persistent order creation', () => {
       NotFoundException,
     );
 
-    expect(decrementStock).not.toHaveBeenCalled();
+    expect(decrementIngredient).not.toHaveBeenCalled();
     expect(createOrder).not.toHaveBeenCalled();
   });
 
@@ -211,7 +301,7 @@ describe('Persistent order creation', () => {
     await expect(
       service.create({ items: [{ ...items[0], quantity: 200000 }] }),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(decrementStock).not.toHaveBeenCalled();
+    expect(decrementIngredient).not.toHaveBeenCalled();
   });
 
   it('rejects an overflowing subtotal even when each line fits in the database', async () => {
@@ -219,7 +309,7 @@ describe('Persistent order creation', () => {
     await expect(
       service.create({ items: [largeItem, largeItem] }),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(decrementStock).not.toHaveBeenCalled();
+    expect(decrementIngredient).not.toHaveBeenCalled();
   });
 
   it('rejects quantities that exceed the database INTEGER range', async () => {

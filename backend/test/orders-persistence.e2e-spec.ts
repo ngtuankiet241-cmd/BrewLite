@@ -10,6 +10,12 @@ import { OrderSizeId, OrderToppingId } from '../src/orders/order.types.js';
 import { OrdersModule } from '../src/orders/orders.module.js';
 import { OrdersService } from '../src/orders/orders.service.js';
 import { PromotionsService } from '../src/promotions/promotions.service.js';
+import {
+  createTestProduct,
+  deleteTestProduct,
+  getTestProductInventory,
+  setTestProductStock,
+} from './helpers/ingredient-inventory.js';
 
 describe('Orders persisted in PostgreSQL', () => {
   const fixtureId = randomUUID();
@@ -17,6 +23,10 @@ describe('Orders persisted in PostgreSQL', () => {
   const otherProductId = `other-product-${fixtureId}`;
   const promotionCode = `TEST_${fixtureId}`.toUpperCase();
   const userId = `persistence-user-${fixtureId}`;
+  let baseIngredientId: string;
+  let otherBaseIngredientId: string;
+  let toppingIngredientId: string;
+  let otherToppingIngredientId: string;
   let token: string;
   const db = new PrismaClient();
   const items = [
@@ -39,12 +49,22 @@ describe('Orders persisted in PostgreSQL', () => {
         passwordHash: 'not-a-login',
       },
     });
-    await db.product.createMany({
-      data: [
-        { id: productId, name: 'Test coffee', price: 35000, stock: 100 },
-        { id: otherProductId, name: 'Test tea', price: 30000, stock: 1 },
-      ],
+    const productInventory = await createTestProduct(db, {
+      id: productId,
+      name: 'Test coffee',
+      price: 35000,
+      stock: 100,
     });
+    const otherProductInventory = await createTestProduct(db, {
+      id: otherProductId,
+      name: 'Test tea',
+      price: 30000,
+      stock: 1,
+    });
+    baseIngredientId = productInventory.baseIngredientId;
+    toppingIngredientId = productInventory.toppingIngredientId;
+    otherBaseIngredientId = otherProductInventory.baseIngredientId;
+    otherToppingIngredientId = otherProductInventory.toppingIngredientId;
     await db.promotion.create({
       data: {
         code: promotionCode,
@@ -58,14 +78,8 @@ describe('Orders persisted in PostgreSQL', () => {
   });
 
   beforeEach(async () => {
-    await db.product.update({
-      where: { id: productId },
-      data: { stock: 100 },
-    });
-    await db.product.update({
-      where: { id: otherProductId },
-      data: { stock: 1 },
-    });
+    await setTestProductStock(db, baseIngredientId, 100);
+    await setTestProductStock(db, otherBaseIngredientId, 1);
     await db.promotion.update({
       where: { code: promotionCode },
       data: { usedCount: 0, usageLimit: 10, isActive: true },
@@ -94,9 +108,14 @@ describe('Orders persisted in PostgreSQL', () => {
   afterAll(async () => {
     try {
       await db.promotion.deleteMany({ where: { code: promotionCode } });
-      await db.product.deleteMany({
-        where: { id: { in: [productId, otherProductId] } },
-      });
+      await deleteTestProduct(db, productId, [
+        baseIngredientId,
+        toppingIngredientId,
+      ]);
+      await deleteTestProduct(db, otherProductId, [
+        otherBaseIngredientId,
+        otherToppingIngredientId,
+      ]);
       await db.user.deleteMany({ where: { id: userId } });
     } finally {
       await db.$disconnect();
@@ -150,8 +169,7 @@ describe('Orders persisted in PostgreSQL', () => {
       expect(saved.items[0].lineTotal.toNumber()).toBe(100000);
       expect(saved.payments).toEqual([]);
       expect(
-        (await reader.product.findUniqueOrThrow({ where: { id: productId } }))
-          .stock,
+        (await getTestProductInventory(reader, baseIngredientId)).stock.toNumber(),
       ).toBe(98);
     } finally {
       await reader.$disconnect();
@@ -207,15 +225,12 @@ describe('Orders persisted in PostgreSQL', () => {
         .usedCount,
     ).toBe(0);
     expect(
-      await db.product.findUnique({ where: { id: productId } }),
-    ).toMatchObject({ stock: 100 });
+      (await getTestProductInventory(db, baseIngredientId)).stock.toNumber(),
+    ).toBe(100);
   });
 
   it('deducts the combined quantity across sizes and rejects another order after stock runs out', async () => {
-    await db.product.update({
-      where: { id: productId },
-      data: { stock: 5 },
-    });
+    await setTestProductStock(db, baseIngredientId, 5);
     const { body } = await request(app!.getHttpServer())
       .post('/orders')
       .auth(token, { type: 'bearer' })
@@ -234,7 +249,7 @@ describe('Orders persisted in PostgreSQL', () => {
     expect(body.items).toHaveLength(2);
     expect(body.totalAmount).toBe(205000);
     expect(
-      (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock,
+      (await getTestProductInventory(db, baseIngredientId)).stock.toNumber(),
     ).toBe(0);
     const savedItems = await db.orderItem.findMany({
       where: { orderId: body.orderCode },
@@ -251,21 +266,19 @@ describe('Orders persisted in PostgreSQL', () => {
       .auth(token, { type: 'bearer' })
       .send({ items })
       .expect(400);
-    expect(rejected.body.message).toBe(
-      'Sản phẩm không đủ tồn kho: Test coffee',
-    );
+    expect(rejected.body.message).toContain('Không đủ nguyên liệu');
     expect(
       await db.order.count({ where: { items: { some: { productId } } } }),
     ).toBe(1);
     expect(
-      (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock,
+      (await getTestProductInventory(db, baseIngredientId)).stock.toNumber(),
     ).toBe(0);
   });
 
   it.each([0, 1, 4])(
     'rejects a combined quantity of 5 when stock is %i without changing inventory or promotions',
     async (stock) => {
-      await db.product.update({ where: { id: productId }, data: { stock } });
+      await setTestProductStock(db, baseIngredientId, stock);
       const { body } = await request(app!.getHttpServer())
         .post('/orders')
         .auth(token, { type: 'bearer' })
@@ -274,10 +287,9 @@ describe('Orders persisted in PostgreSQL', () => {
           promotionCode,
         })
         .expect(400);
-      expect(body.message).toBe('Sản phẩm không đủ tồn kho: Test coffee');
+      expect(body.message).toContain('Không đủ nguyên liệu');
       expect(
-        (await db.product.findUniqueOrThrow({ where: { id: productId } }))
-          .stock,
+        (await getTestProductInventory(db, baseIngredientId)).stock.toNumber(),
       ).toBe(stock);
       expect(await db.orderItem.count({ where: { productId } })).toBe(0);
       expect(await db.order.count({ where: { promotionCode } })).toBe(0);
@@ -301,11 +313,10 @@ describe('Orders persisted in PostgreSQL', () => {
       })
       .expect(400);
     expect(
-      (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock,
+      (await getTestProductInventory(db, baseIngredientId)).stock.toNumber(),
     ).toBe(100);
     expect(
-      (await db.product.findUniqueOrThrow({ where: { id: otherProductId } }))
-        .stock,
+      (await getTestProductInventory(db, otherBaseIngredientId)).stock.toNumber(),
     ).toBe(1);
     expect(await db.order.count({ where: { promotionCode } })).toBe(0);
     expect(
@@ -326,7 +337,7 @@ describe('Orders persisted in PostgreSQL', () => {
       .send({ items, promotionCode })
       .expect(400);
     expect(
-      (await db.product.findUniqueOrThrow({ where: { id: productId } })).stock,
+      (await getTestProductInventory(db, baseIngredientId)).stock.toNumber(),
     ).toBe(100);
     expect(await db.order.count({ where: { promotionCode } })).toBe(0);
     expect(await db.orderItem.count({ where: { productId } })).toBe(0);
