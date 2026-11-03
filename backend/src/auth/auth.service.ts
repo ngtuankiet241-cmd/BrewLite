@@ -1,15 +1,14 @@
-
 import {
   Injectable,
   ConflictException,
   UnauthorizedException,
-  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { LoginDto } from './dto/login.dto.js';
+import { LOYALTY_POLICY } from '../loyalty/loyalty.js';
 
 @Injectable()
 export class AuthService {
@@ -17,6 +16,15 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
   ) {}
+
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, phone: true, loyaltyPoints: true },
+    });
+    if (!user) throw new UnauthorizedException('Tài khoản không còn tồn tại.');
+    return { ...user, loyaltyPolicy: LOYALTY_POLICY };
+  }
 
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
@@ -70,9 +78,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException(
-        'Số điện thoại hoặc mật khẩu không đúng',
-      );
+      throw new UnauthorizedException('Số điện thoại hoặc mật khẩu không đúng');
     }
 
     const passwordMatches = await bcrypt.compare(
@@ -81,9 +87,7 @@ export class AuthService {
     );
 
     if (!passwordMatches) {
-      throw new UnauthorizedException(
-        'Số điện thoại hoặc mật khẩu không đúng',
-      );
+      throw new UnauthorizedException('Số điện thoại hoặc mật khẩu không đúng');
     }
 
     const accessToken = await this.jwtService.signAsync({

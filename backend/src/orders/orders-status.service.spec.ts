@@ -18,11 +18,19 @@ describe('Persistent order status transitions', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
-    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: 'PENDING' });
+    findOrder.mockResolvedValue({
+      id: orderCode,
+      orderCode,
+      status: 'PENDING',
+    });
     updateOrder.mockResolvedValue({ count: 1 });
     service = new OrdersService(
       {
         order: { findFirst: findOrder, updateMany: updateOrder },
+        $transaction: (run: (tx: unknown) => unknown) =>
+          run({
+            order: { findFirst: findOrder, updateMany: updateOrder },
+          }),
       } as unknown as PrismaService,
       {} as PromotionsService,
     );
@@ -60,7 +68,14 @@ describe('Persistent order status transitions', () => {
     }
     expect(findOrder).toHaveBeenCalledWith({
       where: { OR: [{ id: orderCode }, { orderCode }] },
-      select: { id: true, status: true, orderCode: true },
+      select: {
+        id: true,
+        status: true,
+        orderCode: true,
+        userId: true,
+        total: true,
+        pointsRedeemed: true,
+      },
     });
   });
 
@@ -103,7 +118,11 @@ describe('Persistent order status transitions', () => {
   });
 
   it('rejects an unrecognized persisted state without writing to the database', async () => {
-    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: 'UNKNOWN' });
+    findOrder.mockResolvedValue({
+      id: orderCode,
+      orderCode,
+      status: 'UNKNOWN',
+    });
     await expect(
       service.updateStatus(orderCode, 'PAID'),
     ).rejects.toBeInstanceOf(BadRequestException);

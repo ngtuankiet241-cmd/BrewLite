@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException, ValidationPipe,} from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  ValidationPipe,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -15,7 +19,7 @@ describe('Persistent order creation', () => {
   const transaction = vi.fn();
   const tx = {
     order: { create: createOrder },
-    product: { updateMany: decrementStock },
+    product: { findMany: findProducts, updateMany: decrementStock },
   };
   const items = [
     {
@@ -31,20 +35,25 @@ describe('Persistent order creation', () => {
     vi.resetAllMocks();
     decrementStock.mockResolvedValue({ count: 1 });
     findProducts.mockResolvedValue([
-      { id: 'coffee', name: 'Cà phê', price: { toNumber: () => 35000 } },
+      {
+        id: 'coffee',
+        name: 'Cà phê',
+        price: { toNumber: () => 35000 },
+        stock: 100,
+        stockVersion: 0,
+      },
     ]);
     createOrder.mockImplementation(({ data }: Prisma.OrderCreateArgs) =>
-  Promise.resolve({
-    id: data.id,
-    orderCode: data.orderCode,
-    createdAt: new Date('2026-10-23T12:00:00Z'),
-  }),
-);
+      Promise.resolve({
+        id: data.id,
+        orderCode: data.orderCode,
+        createdAt: new Date('2026-10-23T12:00:00Z'),
+      }),
+    );
     transaction.mockImplementation((run: (client: typeof tx) => unknown) =>
       run(tx),
     );
     const prisma = {
-      product: { findMany: findProducts },
       $transaction: transaction,
     } as unknown as PrismaService;
     service = new OrdersService(prisma, {
@@ -60,42 +69,42 @@ describe('Persistent order creation', () => {
       totalAmount: 100000,
       createdAt: '2026-10-23T12:00:00.000Z',
     });
-expect(createOrder).toHaveBeenCalledWith({
-  data: {
-    id: result.orderCode,
-    orderCode: result.orderCode,
-    status: 'PENDING',
-    total: 100000,
-    subtotal: 100000,
-    discount: 0,
-    promotionCode: null,
-    items: {
-      create: [
-        {
-          productId: 'coffee',
-          size: 'M',
-          qty: 2,
-          basePrice: 35000,
-          sizeExtraPrice: 5000,
-          toppings: [
+    expect(createOrder).toHaveBeenCalledWith({
+      data: {
+        id: result.orderCode,
+        orderCode: result.orderCode,
+        status: 'PENDING',
+        total: 100000,
+        subtotal: 100000,
+        discount: 0,
+        promotionCode: null,
+        items: {
+          create: [
             {
-              id: 'cheese',
-              name: 'Kem Cheese',
-              extraPrice: 10000,
+              productId: 'coffee',
+              size: 'M',
+              qty: 2,
+              basePrice: 35000,
+              sizeExtraPrice: 5000,
+              toppings: [
+                {
+                  id: 'cheese',
+                  name: 'Kem Cheese',
+                  extraPrice: 10000,
+                },
+              ],
+              unitPrice: 50000,
+              lineTotal: 100000,
+              snapshot: result.items[0],
             },
           ],
-          unitPrice: 50000,
-          lineTotal: 100000,
-          snapshot: result.items[0],
         },
-      ],
-    },
-  },
-  select: {
-    orderCode: true,
-    createdAt: true,
-  },
-});
+      },
+      select: {
+        orderCode: true,
+        createdAt: true,
+      },
+    });
     expect(consume).not.toHaveBeenCalled();
   });
 
@@ -132,19 +141,28 @@ expect(createOrder).toHaveBeenCalledWith({
       ],
     });
     expect(decrementStock).toHaveBeenCalledExactlyOnceWith({
-      where: { id: 'coffee', stock: { gte: 5 } },
-      data: { stock: { decrement: 5 } },
+      where: { id: 'coffee', stockVersion: 0, stock: { gte: 5 } },
+      data: { stock: { decrement: 5 }, stockVersion: { increment: 1 } },
     });
     expect(result.items).toHaveLength(2);
   });
 
   it('rejects insufficient inventory without saving an order or consuming a promotion', async () => {
-    decrementStock.mockResolvedValue({ count: 0 });
+    findProducts.mockResolvedValue([
+      {
+        id: 'coffee',
+        name: 'Cà phê',
+        price: { toNumber: () => 35000 },
+        stock: 1,
+        stockVersion: 0,
+      },
+    ]);
     await expect(
       service.create({ items, promotionCode: 'BREW10' }),
     ).rejects.toThrow('Sản phẩm không đủ tồn kho: Cà phê');
     expect(createOrder).not.toHaveBeenCalled();
     expect(consume).not.toHaveBeenCalled();
+    expect(decrementStock).not.toHaveBeenCalled();
   });
 
   it('rejects a combined quantity larger than the inventory INTEGER range', async () => {
@@ -160,7 +178,7 @@ expect(createOrder).toHaveBeenCalledWith({
     await expect(
       service.create({ items: [freeItem, { ...freeItem, quantity: 1 }] }),
     ).rejects.toThrow('không đủ tồn kho');
-    expect(transaction).not.toHaveBeenCalled();
+    expect(decrementStock).not.toHaveBeenCalled();
   });
 
   it('propagates a database failure instead of returning a successful order', async () => {
@@ -178,21 +196,22 @@ expect(createOrder).toHaveBeenCalledWith({
     expect(createOrder).not.toHaveBeenCalled();
   });
 
-it('rejects an unknown product before opening a write transaction', async () => {
-  findProducts.mockResolvedValue([]);
+  it('rejects an unknown product before writing any stock or order', async () => {
+    findProducts.mockResolvedValue([]);
 
-  await expect(service.create({ items })).rejects.toBeInstanceOf(
-    NotFoundException,
-  );
+    await expect(service.create({ items })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
 
-  expect(transaction).not.toHaveBeenCalled();
-});
+    expect(decrementStock).not.toHaveBeenCalled();
+    expect(createOrder).not.toHaveBeenCalled();
+  });
 
   it('rejects a line total that exceeds DECIMAL(12,2)', async () => {
     await expect(
       service.create({ items: [{ ...items[0], quantity: 200000 }] }),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(transaction).not.toHaveBeenCalled();
+    expect(decrementStock).not.toHaveBeenCalled();
   });
 
   it('rejects an overflowing subtotal even when each line fits in the database', async () => {
@@ -200,7 +219,7 @@ it('rejects an unknown product before opening a write transaction', async () => 
     await expect(
       service.create({ items: [largeItem, largeItem] }),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(transaction).not.toHaveBeenCalled();
+    expect(decrementStock).not.toHaveBeenCalled();
   });
 
   it('rejects quantities that exceed the database INTEGER range', async () => {

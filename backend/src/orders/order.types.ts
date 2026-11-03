@@ -1,4 +1,3 @@
-
 export enum OrderSizeId {
   Small = 'S',
   Medium = 'M',
@@ -45,5 +44,8 @@ export interface Order {
   subtotalAmount?: number;
   discountAmount?: number;
   promotionCode?: string;
+  pointsRedeemed?: number;
+  pointsDiscount?: number;
+  pointsEarned?: number;
   createdAt: string;
 }

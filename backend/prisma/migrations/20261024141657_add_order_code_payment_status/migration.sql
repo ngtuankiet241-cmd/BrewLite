@@ -1,12 +1,8 @@
-/*
-  Warnings:
-
-  - A unique constraint covering the columns `[orderCode]` on the table `Order` will be added. If there are existing duplicate values, this will fail.
-  - Added the required column `orderCode` to the `Order` table without a default value. This is not possible if the table is not empty.
-
-*/
--- AlterTable
-ALTER TABLE "Order" ADD COLUMN     "orderCode" TEXT NOT NULL;
+-- Existing orders already have unique IDs. Preserve those as their invoice codes
+-- before making the new column required, so upgrading a populated database works.
+ALTER TABLE "Order" ADD COLUMN "orderCode" TEXT;
+UPDATE "Order" SET "orderCode" = "id";
+ALTER TABLE "Order" ALTER COLUMN "orderCode" SET NOT NULL;
 
 -- AlterTable
 ALTER TABLE "Payment" ADD COLUMN     "status" TEXT NOT NULL DEFAULT 'PENDING';

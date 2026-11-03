@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
@@ -11,15 +13,35 @@ describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
   let createdOrderCodes: string[];
   const checkoutProductId = `checkout-test-${randomUUID()}`;
+  const userId = `checkout-user-${randomUUID()}`;
+  let token: string;
 
   beforeEach(async () => {
     createdOrderCodes = [];
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(ConfigService)
+      .useValue(
+        new ConfigService({
+          SEPAY_ENV: 'sandbox',
+          SEPAY_MERCHANT_ID: 'local-test-merchant',
+          SEPAY_SECRET_KEY: 'local-test-secret',
+          SEPAY_IPN_SECRET_KEY: 'local-test-ipn',
+        }),
+      )
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
+    await app.get(PrismaService).user.create({
+      data: {
+        id: userId,
+        email: `${userId}@example.invalid`,
+        passwordHash: 'not-a-login',
+      },
+    });
+    token = app.get(JwtService).sign({ sub: userId });
   });
 
   it('/ (GET)', () => {
@@ -72,6 +94,7 @@ describe('AppController (e2e)', () => {
     });
     const response = await request(app.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({
         items: [
           {
@@ -118,6 +141,7 @@ describe('AppController (e2e)', () => {
   it('/orders (POST) rejects an empty cart', () => {
     return request(app.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({ items: [] })
       .expect(400);
   });
@@ -125,6 +149,7 @@ describe('AppController (e2e)', () => {
   it('/orders (POST) rejects invalid product and option ids', async () => {
     await request(app.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({
         items: [
           {
@@ -135,10 +160,11 @@ describe('AppController (e2e)', () => {
           },
         ],
       })
-      .expect(400);
+      .expect(404);
 
     await request(app.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({
         items: [
           {
@@ -155,6 +181,7 @@ describe('AppController (e2e)', () => {
   it('/orders (POST) rejects invalid quantities and client-supplied prices', async () => {
     await request(app.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({
         items: [
           {
@@ -169,6 +196,7 @@ describe('AppController (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({
         items: [
           {
@@ -193,6 +221,7 @@ describe('AppController (e2e)', () => {
       await app.get(PrismaService).product.deleteMany({
         where: { id: checkoutProductId },
       });
+      await app.get(PrismaService).user.deleteMany({ where: { id: userId } });
     } finally {
       await app.close();
     }

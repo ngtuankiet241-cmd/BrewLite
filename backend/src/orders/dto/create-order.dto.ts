@@ -37,6 +37,12 @@ export class CreateOrderItemDto {
 
 export class CreateOrderDto {
   @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsInt()
+  @Min(0)
+  @Max(2_147_483_647)
+  pointsToRedeem?: number;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )

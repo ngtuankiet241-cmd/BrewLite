@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
@@ -15,6 +16,8 @@ describe('Orders persisted in PostgreSQL', () => {
   const productId = `persistence-test-${fixtureId}`;
   const otherProductId = `other-product-${fixtureId}`;
   const promotionCode = `TEST_${fixtureId}`.toUpperCase();
+  const userId = `persistence-user-${fixtureId}`;
+  let token: string;
   const db = new PrismaClient();
   const items = [
     {
@@ -29,6 +32,13 @@ describe('Orders persisted in PostgreSQL', () => {
   let promotions: PromotionsService;
 
   beforeAll(async () => {
+    await db.user.create({
+      data: {
+        id: userId,
+        email: `${userId}@example.invalid`,
+        passwordHash: 'not-a-login',
+      },
+    });
     await db.product.createMany({
       data: [
         { id: productId, name: 'Test coffee', price: 35000, stock: 100 },
@@ -65,6 +75,7 @@ describe('Orders persisted in PostgreSQL', () => {
     }).compile();
     app = module.createNestApplication();
     await app.init();
+    token = app.get(JwtService).sign({ sub: userId });
     orders = app.get(OrdersService);
     promotions = app.get(PromotionsService);
   });
@@ -86,6 +97,7 @@ describe('Orders persisted in PostgreSQL', () => {
       await db.product.deleteMany({
         where: { id: { in: [productId, otherProductId] } },
       });
+      await db.user.deleteMany({ where: { id: userId } });
     } finally {
       await db.$disconnect();
     }
@@ -94,6 +106,7 @@ describe('Orders persisted in PostgreSQL', () => {
   it('keeps the order and option/price snapshots after the application closes', async () => {
     const { body } = await request(app!.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({ items })
       .expect(201);
     expect(body).toMatchObject({
@@ -126,7 +139,7 @@ describe('Orders persisted in PostgreSQL', () => {
         include: { items: true, payments: true },
       });
       expect(saved.status).toBe('PENDING');
-      expect(saved.userId).toBeNull();
+      expect(saved.userId).toBe(userId);
       expect(saved.total.toNumber()).toBe(100000);
       expect(saved.subtotal!.toNumber()).toBe(100000);
       expect(saved.discount.toNumber()).toBe(0);
@@ -152,6 +165,7 @@ describe('Orders persisted in PostgreSQL', () => {
   it('saves promotion totals and consumes exactly one use', async () => {
     const { body } = await request(app!.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({ items, promotionCode })
       .expect(201);
     const saved = await db.order.findUniqueOrThrow({
@@ -204,6 +218,7 @@ describe('Orders persisted in PostgreSQL', () => {
     });
     const { body } = await request(app!.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({
         items: [
           items[0],
@@ -233,6 +248,7 @@ describe('Orders persisted in PostgreSQL', () => {
 
     const rejected = await request(app!.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({ items })
       .expect(400);
     expect(rejected.body.message).toBe(
@@ -252,6 +268,7 @@ describe('Orders persisted in PostgreSQL', () => {
       await db.product.update({ where: { id: productId }, data: { stock } });
       const { body } = await request(app!.getHttpServer())
         .post('/orders')
+        .auth(token, { type: 'bearer' })
         .send({
           items: [items[0], { ...items[0], quantity: 3 }],
           promotionCode,
@@ -277,6 +294,7 @@ describe('Orders persisted in PostgreSQL', () => {
   it('restores deductions for earlier products when a later product has insufficient stock', async () => {
     await request(app!.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({
         items: [items[0], { ...items[0], productId: otherProductId }],
         promotionCode,
@@ -304,6 +322,7 @@ describe('Orders persisted in PostgreSQL', () => {
     });
     await request(app!.getHttpServer())
       .post('/orders')
+      .auth(token, { type: 'bearer' })
       .send({ items, promotionCode })
       .expect(400);
     expect(

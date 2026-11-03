@@ -36,9 +36,11 @@ the frontend supplies defaults for those fields. The seed menu contains 10 produ
 |---|---|
 | Method and path | `POST /orders` |
 | Success response | HTTP `201`; created order |
-| Authentication | Not required in this task; JWT integration remains separate |
+| Authentication | Required; Bearer JWT associates the order with the signed-in user |
+| Idempotency | Send `Idempotency-Key` and reuse it with the same body when retrying; replay returns the original result, changed content returns `409` |
 | Persistence | PostgreSQL through Prisma; the order, its items, inventory deduction and promotion usage are committed in one transaction |
-| Status | New orders start as `PENDING` |
+| Concurrent stock updates | Internal `stockVersion` check and increment; retry the whole transaction up to 5 attempts on a version conflict |
+| Status | New orders start as `PENDING`, or `PAID` when discounts/points cover the total |
 | Price handling | Backend looks up product prices and validates size/topping IDs; client prices are not accepted |
 
 Request body:
@@ -66,8 +68,8 @@ cà phê sữa items at 50,000 VND each, for a total of 100,000 VND.
 
 `orderCode` is stored as the `Order.id` primary key (and is the value a future
 payment will use as `Payment.orderId`). A new order has no payment record yet.
-The existing guest checkout remains supported: `userId` is nullable and is not
-accepted from the request body; associating authenticated users is a later task.
+`userId` comes from the JWT and is not accepted from the request body.
+The database retains support for legacy orders with a null `userId`.
 
 An optional `promotionCode` applies a validated promotion. Discounted responses
 also include `subtotalAmount`, `discountAmount`, and the normalized `promotionCode`.
@@ -83,19 +85,28 @@ stock (including zero stock), `POST /orders` returns HTTP `400` with a message
 identifying the product. The cart is retained on failure; after success, the
 frontend reloads the menu to display the updated inventory.
 
+Inventory is read and deducted within the same transaction using optimistic
+locking. Updates must match the product's stock version and sufficient quantity;
+the stock version increments with each successful deduction. A stale version
+rolls back the whole transaction before retrying. After five conflicting attempts,
+the API returns HTTP `409` and asks the client to retry. See
+[concurrent inventory and tests](concurrent-inventory.md) for the database
+guarantees and test commands.
+
 Creating the order and its items, deducting stock and consuming a promotion share
 one transaction. A failure rolls back all writes, including inventory deductions
 and the promotion usage counter. Whole-VND line totals and subtotals must fit the
 existing `DECIMAL(12,2)` database columns
 (at most 9,999,999,999 VND); quantity must fit a PostgreSQL `INTEGER`.
 
+See [idempotency](idempotency.md) for payment API rules,
+key persistence, conflict responses and tests against PostgreSQL.
+
 ## Decisions still needed
 
 | Topic | Current status | Follow-up |
 |---|---|---|
 | Product category and description | Not returned by `GET /products`; frontend infers these values from the name, which can misclassify drinks such as soda or matcha. | Team agrees whether these fields belong in the API response, then updates the frontend/API consistently. |
-| Authentication on order creation | Not required for task 6. | Confirm user association and JWT guard when integrating the authentication task. |
-| Payment and order-state transitions | A new order is created only as `PENDING`. | Payment outcomes and later transitions are implemented in their respective tasks. |
 
 ## Local verification
 

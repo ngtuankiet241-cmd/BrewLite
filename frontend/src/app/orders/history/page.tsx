@@ -24,6 +24,13 @@ type Order = {
   orderCode: string;
   status: string;
   totalAmount: number;
+  subtotalAmount?: number;
+  discountAmount?: number;
+  promotionCode?: string;
+  pointsRedeemed?: number;
+  pointsDiscount?: number;
+  pointsEarned?: number;
+  pointsRefunded?: boolean;
   createdAt: string;
   items: OrderItem[];
 };
@@ -249,6 +256,9 @@ export default function OrderHistoryPage() {
                           {formatMoney(order.totalAmount)}
                         </span>
                       </div>
+                      {(order.discountAmount ?? 0) > 0 && <p className="text-sm text-emerald-800">Mã {order.promotionCode}: giảm {formatMoney(order.discountAmount ?? 0)}</p>}
+                      {(order.pointsRedeemed ?? 0) > 0 && <p className="text-sm text-emerald-800">Đã dùng {order.pointsRedeemed} điểm: giảm {formatMoney(order.pointsDiscount ?? 0)}{order.pointsRefunded ? " (đã hoàn điểm)" : ""}.</p>}
+                      {(order.pointsEarned ?? 0) > 0 && <p className="text-sm text-emerald-800">Đã nhận {order.pointsEarned} điểm tích lũy.</p>}
                     </div>
                   )}
                 </div>

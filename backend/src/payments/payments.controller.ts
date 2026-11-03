@@ -1,9 +1,10 @@
-
 import {
   Body,
   Controller,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Post,
   Query,
   Req,
@@ -17,15 +18,13 @@ import { PaymentsService } from './payments.service.js';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(
-    private readonly paymentsService: PaymentsService,
-  ) {}
+  constructor(private readonly paymentsService: PaymentsService) {}
 
   @Post()
   @UseGuards(JwtAuthGuard)
   create(
     @Req() request: AuthenticatedRequest,
-    @Headers('idempotency-key') idempotencyKey: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body(
       new ValidationPipe({
         transform: true,
@@ -35,11 +34,7 @@ export class PaymentsController {
     )
     dto: CreatePaymentDto,
   ) {
-    return this.paymentsService.create(
-      dto,
-      request.user.sub,
-      idempotencyKey,
-    );
+    return this.paymentsService.create(dto, request.user.sub, idempotencyKey);
   }
 
   @Get('status')
@@ -55,13 +50,11 @@ export class PaymentsController {
   }
 
   @Post('ipn')
+  @HttpCode(HttpStatus.OK)
   ipn(
     @Headers('x-secret-key') secretKey: string | undefined,
     @Body() body: Record<string, unknown>,
   ) {
-    return this.paymentsService.handleIpn(
-      secretKey,
-      body,
-    );
+    return this.paymentsService.handleIpn(secretKey, body);
   }
 }
