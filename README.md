@@ -60,6 +60,19 @@ Open `http://localhost:3000` in a browser. The menu requests products from
 `GET http://localhost:3001/products`; keep the backend running while using the
 frontend.
 
+### Run with Docker Compose
+
+If Docker Desktop is installed, start PostgreSQL, the backend, and the frontend
+from the repository root:
+
+```powershell
+docker compose up --build
+```
+
+Open `http://localhost:3000` after the services start. Compose applies database
+migrations and seeds the sample data when the backend starts. Stop the services
+with `Ctrl+C`, or run `docker compose down` in another terminal.
+
 ## Current API
 
 `GET /products` returns products from the database. A product currently contains:
