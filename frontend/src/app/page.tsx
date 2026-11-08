@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import CartDrawer from "../components/CartDrawer";
 import { useCart } from "../context/CartContext";
 import AuthModal from "../components/AuthModal";
-import { API_URL, fetchAccount } from "../lib/account";
+import { fetchAccount } from "../lib/account";
 import { getQuantityError } from "../lib/inventory";
 import { API_URL } from "../config/api";
 
