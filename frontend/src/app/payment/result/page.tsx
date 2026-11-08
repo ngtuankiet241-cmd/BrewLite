@@ -3,7 +3,6 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { API_URL } from "../../../lib/account";
 import { useCart } from "../../../context/CartContext";
 import { API_URL } from "../../../config/api";
 
