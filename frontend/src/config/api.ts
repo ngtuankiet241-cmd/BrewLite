@@ -1,3 +1,3 @@
 export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:3001";
-
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ||
+  "https://brewlite-t5xl.onrender.com";
