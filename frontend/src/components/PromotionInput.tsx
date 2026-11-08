@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { API_URL } from "../config/api";
 
 export interface PromotionQuote {
   code: string;
@@ -50,7 +51,7 @@ export default function PromotionInput({
     setError(null);
     try {
       const response = await fetch(
-        "http://localhost:3001/promotions/validate",
+        `${API_URL}/promotions/validate`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

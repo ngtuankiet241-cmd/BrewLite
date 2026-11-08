@@ -6,6 +6,7 @@ import { useCart } from "../context/CartContext";
 import AuthModal from "../components/AuthModal";
 import { fetchAccount } from "../lib/account";
 import { getQuantityError } from "../lib/inventory";
+import { API_URL } from "../config/api";
 
 // ============================================================================
 // 1. ĐỊNH NGHĨA KIỂU DỮ LIỆU (TYPES & INTERFACES)
@@ -185,7 +186,7 @@ const handleLogout = () => {
    */
   const fetchProducts = useCallback(async () => {
     try {
-      const response = await fetch("http://localhost:3001/products");
+      const response = await fetch(`${API_URL}/products`);
 
       if (!response.ok) {
         throw new Error(
