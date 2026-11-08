@@ -75,20 +75,25 @@ with `Ctrl+C`, or run `docker compose down` in another terminal.
 
 ## Current API
 
-`GET /products` returns products from the database. A product currently contains:
-`id`, `name`, `price` (integer VND), `imageUrl`, and `stock` (inventory quantity).
-It does not yet return category or description. See [the API contract and open decisions](docs/api-contracts.md).
+`GET /products` returns products from the database. A product contains `id`,
+`name`, `price` (integer VND), `imageUrl`, `stock` (maximum available quantity
+across sizes), and `stockBySize` (estimated number of drinks possible per size).
+Inventory is tracked by ingredient in base units (`g`, `ml`, or `unit`) and
+converted to drink availability using size and topping recipes. Seed stock and
+recipes are illustrative; replace them with the team's agreed recipes and
+opening inventory before relying on them. The API does not yet return category
+or description. See [the API contract and open decisions](docs/api-contracts.md).
 
 The backend enables CORS for local frontend requests. `POST /orders` requires
-login and creates a validated order in PostgreSQL, including item and price snapshots.
-The order, its items, stock deductions and any promotion usage are saved in one
-transaction, and orders survive backend restarts. Insufficient stock rejects the
-order; successful checkout reloads the menu inventory. The frontend cart keeps
-its contents if order creation fails. Both order creation and SePay payment
+login and creates a validated order in PostgreSQL, including item and price
+snapshots. The order, its items, ingredient deductions and any promotion usage
+are saved in one transaction, and orders survive backend restarts. Insufficient
+ingredients reject the order; successful checkout reloads menu availability.
+The frontend cart keeps its contents if order creation fails. Both order creation and SePay payment
 initialization support `Idempotency-Key`; retries reuse the original result.
 See [idempotency rules and tests](docs/idempotency.md) for the API rules.
-Concurrent orders use a stock version check and retry the transaction on a
-conflict. See [concurrent inventory and tests](docs/concurrent-inventory.md).
+Concurrent orders use per-ingredient stock version checks and retry the
+transaction on a conflict. See [concurrent inventory and tests](docs/concurrent-inventory.md).
 Payments in this project are
 simulated and must not use real payment credentials.
 
@@ -107,8 +112,8 @@ npm.cmd --prefix frontend run build
 
 The backend e2e suite requires the configured PostgreSQL database with migrations
 applied and menu data seeded. It covers the product list, order creation,
-persistence after closing the app, stock deduction, insufficient stock, transaction
-rollback, two sequential requests with the same idempotency key,
+persistence after closing the app, ingredient deductions, insufficient
+ingredients, transaction rollback, two sequential requests with the same idempotency key,
 duplicate payment callbacks, concurrent inventory with optimistic locking and
 concurrent promotion checkout. The persistence tests create unique
 fixtures and remove them after testing. See

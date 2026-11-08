@@ -9,6 +9,12 @@ import { OrdersController } from '../src/orders/orders.controller.js';
 import { OrdersService } from '../src/orders/orders.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { PromotionsService } from '../src/promotions/promotions.service.js';
+import {
+  createTestProduct,
+  deleteTestProduct,
+  getTestProductInventory,
+  setTestProductStock,
+} from './helpers/ingredient-inventory.js';
 
 describe('Concurrent orders with optimistic inventory locking in PostgreSQL', () => {
   const db = new PrismaClient();
@@ -20,6 +26,10 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
   let second: INestApplication<App>;
   let productId: string;
   let otherProductId: string;
+  let baseIngredientId: string;
+  let otherBaseIngredientId: string;
+  let toppingIngredientId: string;
+  let otherToppingIngredientId: string;
   let promotionCode: string;
   let userIds: string[];
   let tokens: string[];
@@ -43,7 +53,7 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
   async function application(client: PrismaClient) {
     const observed = client.$extends({
       query: {
-        product: {
+        ingredient: {
           async findMany({ args, query }) {
             const result = await query(args);
             // Make competing checkouts read the same version before any UPDATE.
@@ -100,14 +110,22 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
         loyaltyPoints: 100,
       })),
     });
-    await db.product.createMany({
-      data: [productId, otherProductId].map((id) => ({
-        id,
-        name: 'Inventory fixture',
-        price: 25000,
-        stock: 20,
-      })),
+    const firstInventory = await createTestProduct(db, {
+      id: productId,
+      name: 'Inventory fixture A',
+      price: 25000,
+      stock: 20,
     });
+    const secondInventory = await createTestProduct(db, {
+      id: otherProductId,
+      name: 'Inventory fixture B',
+      price: 25000,
+      stock: 20,
+    });
+    baseIngredientId = firstInventory.baseIngredientId;
+    toppingIngredientId = firstInventory.toppingIngredientId;
+    otherBaseIngredientId = secondInventory.baseIngredientId;
+    otherToppingIngredientId = secondInventory.toppingIngredientId;
     tokens = userIds.map((id) => first.get(JwtService).sign({ sub: id }));
   });
 
@@ -120,11 +138,16 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
       });
       await tx.order.deleteMany({ where: { userId: { in: userIds } } });
       await tx.promotion.deleteMany({ where: { code: promotionCode } });
-      await tx.product.deleteMany({
-        where: { id: { in: [productId, otherProductId] } },
-      });
       await tx.user.deleteMany({ where: { id: { in: userIds } } });
     });
+    await deleteTestProduct(db, productId, [
+      baseIngredientId,
+      toppingIngredientId,
+    ]);
+    await deleteTestProduct(db, otherProductId, [
+      otherBaseIngredientId,
+      otherToppingIngredientId,
+    ]);
   });
 
   afterAll(async () => {
@@ -155,8 +178,8 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
   };
   const orderCount = () =>
     db.order.count({ where: { userId: { in: userIds } } });
-  const product = (id = productId) =>
-    db.product.findUniqueOrThrow({ where: { id } });
+  const productInventory = (id = baseIngredientId) =>
+    getTestProductInventory(db, id);
 
   it.each([
     { initial: 1, quantity: 1 },
@@ -165,10 +188,7 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
   ])(
     'never oversells stock=$initial when 12 different customers concurrently order quantity=$quantity',
     async ({ initial, quantity }) => {
-      await db.product.update({
-        where: { id: productId },
-        data: { stock: initial },
-      });
+      await setTestProductStock(db, baseIngredientId, initial);
       synchronizeReads(12);
       const responses = await Promise.all(
         userIds.map((_, i) => submit(i, items(quantity))),
@@ -178,7 +198,7 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
       expect(accepted).toHaveLength(Math.floor(initial / quantity));
       expect(rejected).toHaveLength(12 - accepted.length);
       for (const response of rejected)
-        expect(response.body.message).toContain('không đủ tồn kho');
+        expect(response.body.message).toContain('Không đủ nguyên liệu');
       expect(new Set(accepted.map((r) => r.body.orderCode)).size).toBe(
         accepted.length,
       );
@@ -189,10 +209,10 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
         _sum: { qty: true },
       });
       const sold = saved._sum.qty ?? 0;
-      const remaining = await product();
+      const remaining = await productInventory();
       expect(sold).toBe(accepted.length * quantity);
-      expect(remaining.stock).toBeGreaterThanOrEqual(0);
-      expect(sold + remaining.stock).toBe(initial);
+      expect(remaining.stock.toNumber()).toBeGreaterThanOrEqual(0);
+      expect(sold + remaining.stock.toNumber()).toBe(initial);
       expect(remaining.stockVersion).toBe(accepted.length);
       expect(
         await db.idempotencyRequest.count({
@@ -203,7 +223,7 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
   );
 
   it('protects concurrent orders without an Idempotency-Key as well', async () => {
-    await db.product.update({ where: { id: productId }, data: { stock: 1 } });
+    await setTestProductStock(db, baseIngredientId, 1);
     synchronizeReads(2);
     const responses = await Promise.all([
       submit(0, items(), {}, null),
@@ -212,26 +232,28 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
     expect(responses.map((r) => r.status).sort((a, b) => a - b)).toEqual([
       201, 400,
     ]);
-    expect(await product()).toMatchObject({ stock: 0, stockVersion: 1 });
+    expect((await productInventory()).stock.toNumber()).toBe(0);
+    expect((await productInventory()).stockVersion).toBe(1);
     expect(await orderCount()).toBe(1);
     expect(versionConflicts).toBe(1);
   });
 
   it('retries the stale version and accepts both customers when enough stock remains', async () => {
-    await db.product.update({ where: { id: productId }, data: { stock: 4 } });
+    await setTestProductStock(db, baseIngredientId, 4);
     synchronizeReads(2);
     const responses = await Promise.all([
       submit(0, items(2)),
       submit(1, items(2)),
     ]);
     expect(responses.map((r) => r.status)).toEqual([201, 201]);
-    expect(await product()).toMatchObject({ stock: 0, stockVersion: 2 });
+    expect((await productInventory()).stock.toNumber()).toBe(0);
+    expect((await productInventory()).stockVersion).toBe(2);
     expect(await orderCount()).toBe(2);
     expect(versionConflicts).toBe(1);
   });
 
   it('combines quantities across sizes before reserving the last units', async () => {
-    await db.product.update({ where: { id: productId }, data: { stock: 3 } });
+    await setTestProductStock(db, baseIngredientId, 3);
     const cart = [
       items()[0],
       { ...items(2)[0], sizeId: 'M', toppingIds: ['cheese'] },
@@ -241,16 +263,15 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
     expect(responses.map((r) => r.status).sort((a, b) => a - b)).toEqual([
       201, 400,
     ]);
-    expect(await product()).toMatchObject({ stock: 0, stockVersion: 1 });
+    expect((await productInventory()).stock.toNumber()).toBe(0);
+    expect((await productInventory()).stockVersion).toBe(1);
     expect(await orderCount()).toBe(1);
     expect(await db.orderItem.count({ where: { productId } })).toBe(2);
   });
 
   it('handles carts listing products in opposite orders without deadlocks or partial deductions', async () => {
-    await db.product.updateMany({
-      where: { id: { in: [productId, otherProductId] } },
-      data: { stock: 1 },
-    });
+    await setTestProductStock(db, baseIngredientId, 1);
+    await setTestProductStock(db, otherBaseIngredientId, 1);
     const cart = [items()[0], { ...items()[0], productId: otherProductId }];
     synchronizeReads(2);
     const responses = await Promise.all([
@@ -260,26 +281,29 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
     expect(responses.map((r) => r.status).sort((a, b) => a - b)).toEqual([
       201, 400,
     ]);
-    expect(await product()).toMatchObject({ stock: 0, stockVersion: 1 });
-    expect(await product(otherProductId)).toMatchObject({
-      stock: 0,
-      stockVersion: 1,
-    });
+    expect((await productInventory()).stock.toNumber()).toBe(0);
+    expect((await productInventory()).stockVersion).toBe(1);
+    expect(
+      (await productInventory(otherBaseIngredientId)).stock.toNumber(),
+    ).toBe(0);
+    expect(
+      (await productInventory(otherBaseIngredientId)).stockVersion,
+    ).toBe(1);
     expect(await orderCount()).toBe(1);
   });
 
   it('rolls back earlier product deductions and versions when a later product is unavailable', async () => {
-    await db.product.update({
-      where: { id: otherProductId },
-      data: { stock: 0 },
-    });
+    await setTestProductStock(db, otherBaseIngredientId, 0);
     const cart = [items()[0], { ...items()[0], productId: otherProductId }];
     await submit(0, cart).expect(400);
-    expect(await product()).toMatchObject({ stock: 20, stockVersion: 0 });
-    expect(await product(otherProductId)).toMatchObject({
-      stock: 0,
-      stockVersion: 0,
-    });
+    expect((await productInventory()).stock.toNumber()).toBe(20);
+    expect((await productInventory()).stockVersion).toBe(0);
+    expect(
+      (await productInventory(otherBaseIngredientId)).stock.toNumber(),
+    ).toBe(0);
+    expect(
+      (await productInventory(otherBaseIngredientId)).stockVersion,
+    ).toBe(0);
     expect(await orderCount()).toBe(0);
     expect(await db.orderItem.count({ where: { productId } })).toBe(0);
     expect(
@@ -290,10 +314,10 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
   it('rolls back an earlier deduction before retrying a conflict on a later product', async () => {
     let changed = false;
     beforeStockUpdate = async (id) => {
-      if (id !== otherProductId || changed) return;
+      if (id !== otherBaseIngredientId || changed) return;
       changed = true;
       // A separate writer changes B after checkout read it and reserved A.
-      await db.product.update({
+      await db.ingredient.update({
         where: { id },
         data: { stockVersion: { increment: 1 } },
       });
@@ -303,11 +327,14 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
       { ...items()[0], productId: otherProductId },
     ]).expect(201);
     expect(versionConflicts).toBe(1);
-    expect(await product()).toMatchObject({ stock: 19, stockVersion: 1 });
-    expect(await product(otherProductId)).toMatchObject({
-      stock: 19,
-      stockVersion: 2,
-    });
+    expect((await productInventory()).stock.toNumber()).toBe(19);
+    expect((await productInventory()).stockVersion).toBe(1);
+    expect(
+      (await productInventory(otherBaseIngredientId)).stock.toNumber(),
+    ).toBe(19);
+    expect(
+      (await productInventory(otherBaseIngredientId)).stockVersion,
+    ).toBe(2);
     expect(await orderCount()).toBe(1);
     expect(
       await db.orderItem.count({
@@ -317,7 +344,7 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
   });
 
   it('deducts promotion usage and points only for the customer who wins the last stock', async () => {
-    await db.product.update({ where: { id: productId }, data: { stock: 1 } });
+    await setTestProductStock(db, baseIngredientId, 1);
     await db.promotion.create({
       data: {
         code: promotionCode,
@@ -350,7 +377,8 @@ describe('Concurrent orders with optimistic inventory locking in PostgreSQL', ()
       (await db.promotion.findUniqueOrThrow({ where: { code: promotionCode } }))
         .usedCount,
     ).toBe(1);
-    expect(await product()).toMatchObject({ stock: 0, stockVersion: 1 });
+    expect((await productInventory()).stock.toNumber()).toBe(0);
+    expect((await productInventory()).stockVersion).toBe(1);
     expect(await orderCount()).toBe(1);
   });
 });

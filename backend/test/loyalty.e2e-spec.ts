@@ -15,12 +15,19 @@ import { PaymentsController } from '../src/payments/payments.controller.js';
 import { PaymentsService } from '../src/payments/payments.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { PromotionsService } from '../src/promotions/promotions.service.js';
+import {
+  createTestProduct,
+  deleteTestProduct,
+  getTestProductInventory,
+} from './helpers/ingredient-inventory.js';
 
 describe('Loyalty points persisted in PostgreSQL', () => {
   const db = new PrismaClient();
   const ipnSecret = 'local-loyalty-test-ipn';
   let app: INestApplication<App>;
   let fixture: string;
+  let baseIngredientId: string;
+  let toppingIngredientId: string;
   let token: string;
 
   beforeAll(async () => {
@@ -68,9 +75,14 @@ describe('Loyalty points persisted in PostgreSQL', () => {
         loyaltyPoints: 100,
       },
     });
-    await db.product.create({
-      data: { id: fixture, name: 'Loyalty fixture', price: 25000, stock: 20 },
+    const inventory = await createTestProduct(db, {
+      id: fixture,
+      name: 'Loyalty fixture',
+      price: 25000,
+      stock: 20,
     });
+    baseIngredientId = inventory.baseIngredientId;
+    toppingIngredientId = inventory.toppingIngredientId;
     token = app.get(JwtService).sign({ sub: fixture });
   });
 
@@ -79,9 +91,12 @@ describe('Loyalty points persisted in PostgreSQL', () => {
       await tx.payment.deleteMany({ where: { order: { userId: fixture } } });
       await tx.order.deleteMany({ where: { userId: fixture } });
       await tx.promotion.deleteMany({ where: { code: fixture.toUpperCase() } });
-      await tx.product.deleteMany({ where: { id: fixture } });
       await tx.user.deleteMany({ where: { id: fixture } });
     });
+    await deleteTestProduct(db, fixture, [
+      baseIngredientId,
+      toppingIngredientId,
+    ]);
   });
 
   afterAll(async () => {
@@ -192,7 +207,7 @@ describe('Loyalty points persisted in PostgreSQL', () => {
     await create(101, { promotionCode: fixture.toUpperCase() }).expect(400);
     expect(await balance()).toBe(100);
     expect(
-      (await db.product.findUniqueOrThrow({ where: { id: fixture } })).stock,
+      (await getTestProductInventory(db, baseIngredientId)).stock.toNumber(),
     ).toBe(20);
     expect(
       (
@@ -211,7 +226,7 @@ describe('Loyalty points persisted in PostgreSQL', () => {
     ]);
     expect(await balance()).toBe(20);
     expect(
-      (await db.product.findUniqueOrThrow({ where: { id: fixture } })).stock,
+      (await getTestProductInventory(db, baseIngredientId)).stock.toNumber(),
     ).toBe(19);
   });
 

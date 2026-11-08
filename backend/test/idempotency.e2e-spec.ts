@@ -13,6 +13,12 @@ import { PaymentsController } from '../src/payments/payments.controller.js';
 import { PaymentsService } from '../src/payments/payments.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { PromotionsService } from '../src/promotions/promotions.service.js';
+import {
+  createTestProduct,
+  deleteTestProduct,
+  getTestProductInventory,
+  setTestProductStock,
+} from './helpers/ingredient-inventory.js';
 
 describe('Idempotent checkout retries in PostgreSQL', () => {
   const db = new PrismaClient();
@@ -22,6 +28,8 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
   let first: INestApplication<App>;
   let second: INestApplication<App>;
   let fixture: string;
+  let baseIngredientId: string;
+  let toppingIngredientId: string;
   let token: string;
   let otherToken: string;
 
@@ -68,14 +76,14 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
         loyaltyPoints: 100,
       })),
     });
-    await db.product.create({
-      data: {
-        id: fixture,
-        name: 'Idempotency coffee',
-        price: 25000,
-        stock: 20,
-      },
+    const inventory = await createTestProduct(db, {
+      id: fixture,
+      name: 'Idempotency coffee',
+      price: 25000,
+      stock: 20,
     });
+    baseIngredientId = inventory.baseIngredientId;
+    toppingIngredientId = inventory.toppingIngredientId;
     token = first.get(JwtService).sign({ sub: fixture });
     otherToken = first.get(JwtService).sign({ sub: `${fixture}-other` });
   });
@@ -88,10 +96,13 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
       });
       await tx.order.deleteMany({ where: { userId: { in: userIds } } });
       await tx.promotion.deleteMany({ where: { code: fixture.toUpperCase() } });
-      await tx.product.deleteMany({ where: { id: { in: userIds } } });
       // Idempotency records belong to these unique users and cascade on delete.
       await tx.user.deleteMany({ where: { id: { in: userIds } } });
     });
+    await deleteTestProduct(db, fixture, [
+      baseIngredientId,
+      toppingIngredientId,
+    ]);
   });
 
   afterAll(async () => {
@@ -130,7 +141,7 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
       .set('Idempotency-Key', key)
       .send({ orderCode });
   const stock = async () =>
-    (await db.product.findUniqueOrThrow({ where: { id: fixture } })).stock;
+    (await getTestProductInventory(db, baseIngredientId)).stock.toNumber();
   const balance = async () =>
     (await db.user.findUniqueOrThrow({ where: { id: fixture } })).loyaltyPoints;
   const orderCount = () => db.order.count({ where: { userId: fixture } });
@@ -191,11 +202,12 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
     const key = randomUUID();
     const initial = await order(first, key).expect(201);
 
-    // Replay must precede price and stock validation, even after restart.
+    // Replay must precede price and ingredient inventory validation, even after restart.
     await db.product.update({
       where: { id: fixture },
-      data: { price: 90000, stock: 0 },
+      data: { price: 90000 },
     });
+    await setTestProductStock(db, baseIngredientId, 0);
     await second.close();
     second = await application(secondDb);
     const replay = await order(second, key).expect(201);
@@ -252,12 +264,12 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
 
   it('allows a retry with the same key after an insufficient-stock failure', async () => {
     const key = randomUUID();
-    await db.product.update({ where: { id: fixture }, data: { stock: 0 } });
+    await setTestProductStock(db, baseIngredientId, 0);
     await order(first, key).expect(400);
     expect(
       await db.idempotencyRequest.count({ where: { userId: fixture } }),
     ).toBe(0);
-    await db.product.update({ where: { id: fixture }, data: { stock: 1 } });
+    await setTestProductStock(db, baseIngredientId, 1);
     await order(second, key).expect(201);
     expect(await stock()).toBe(0);
     expect(await orderCount()).toBe(1);

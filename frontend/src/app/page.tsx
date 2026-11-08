@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import CartDrawer from "../components/CartDrawer";
 import { useCart } from "../context/CartContext";
 import AuthModal from "../components/AuthModal";
-import { fetchAccount } from "../lib/account";
+import { API_URL, fetchAccount } from "../lib/account";
 import { getQuantityError } from "../lib/inventory";
 import { API_URL } from "../config/api";
 
@@ -21,6 +21,7 @@ export interface BackendProduct {
   price: number;
   imageUrl: string;
   stock: number;
+  stockBySize: Record<"S" | "M" | "L", number>;
 }
 
 /**
@@ -35,7 +36,7 @@ export interface Product extends BackendProduct {
  * Interface cho tùy chọn kích cỡ (Size)
  */
 export interface SizeOption {
-  id: string;
+  id: "S" | "M" | "L";
   name: string;
   extraPrice: number;
 }
@@ -163,7 +164,8 @@ const handleLogout = () => {
   const [quantity, setQuantity] = useState<number>(1);
   const [quantityInput, setQuantityInput] = useState("1");
   const selectedStock = selectedProduct
-    ? products.find((product) => product.id === selectedProduct.id)?.stock ?? selectedProduct.stock
+    ? products.find((product) => product.id === selectedProduct.id)?.stockBySize[selectedSize.id] ??
+      selectedProduct.stockBySize[selectedSize.id]
     : 0;
   const quantityInCart = selectedProduct
     ? cartItems.reduce((sum, item) => sum + (item.id === selectedProduct.id ? item.quantity : 0), 0)
@@ -178,7 +180,7 @@ const handleLogout = () => {
     useState<AddedCartItemSummary | null>(null);
 
   /**
-   * Gọi API NestJS tại http://localhost:3001/products
+   * Gọi API NestJS qua API_URL
    * Phân loại category theo tên:
    *  - Chứa "cà phê", "americano", "cappuccino" -> 'Cà phê'
    *  - Chứa "trà", "tea" -> 'Trà trái cây'
@@ -788,7 +790,9 @@ const handleLogout = () => {
                         />
                         {/* Tag số lượng có sẵn */}
                         <span className="absolute top-2 right-2 bg-black/45 backdrop-blur-md text-white text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/10 shadow-xs">
-                          {product.stock > 0 ? `Còn ${product.stock}` : "Hết hàng"}
+                          {product.stock > 0
+                            ? `Ước tính tối đa ${product.stock} ly (tùy size)`
+                            : "Hết hàng"}
                         </span>
                       </div>
 
@@ -1083,7 +1087,7 @@ const handleLogout = () => {
                       Số lượng
                     </span>
                     <span className="text-[11px] text-stone-500">
-                      Còn {selectedStock} món trong kho
+                      Còn tối đa {selectedStock} ly size {selectedSize.id}
                     </span>
                     {quantityInCart > 0 && (
                       <span className="block text-[11px] text-stone-500">

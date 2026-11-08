@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import type { Prisma, Promotion } from '@prisma/client';
+import { Prisma, type Promotion } from '@prisma/client';
 import { vi } from 'vitest';
 import { OrdersService } from '../orders/orders.service.js';
 import { OrderSizeId } from '../orders/order.types.js';
@@ -38,15 +38,37 @@ describe('Promotions and discounted orders', () => {
         id: 'coffee',
         name: 'Cà phê',
         price: { toNumber: () => 35000 },
-        stock: 100,
+        recipeIngredients: ['S', 'M', 'L'].map((sizeId) => ({
+          sizeId,
+          quantity: new Prisma.Decimal(1),
+          ingredient: {
+            id: 'coffee-beans',
+            name: 'Cà phê',
+            unit: 'g',
+          },
+        })),
+      },
+    ]);
+    const findToppingRecipes = vi.fn().mockResolvedValue([]);
+    const findIngredients = vi.fn().mockResolvedValue([
+      {
+        id: 'coffee-beans',
+        name: 'Cà phê',
+        unit: 'g',
+        stock: new Prisma.Decimal(100),
         stockVersion: 0,
       },
     ]);
+    const updateIngredient = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       promotion: { findUnique, updateMany },
       product: {
         findMany: findProducts,
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      toppingRecipeIngredient: { findMany: findToppingRecipes },
+      ingredient: {
+        findMany: findIngredients,
+        updateMany: updateIngredient,
       },
       order: {
         create: vi
