@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import CartDrawer from "../components/CartDrawer";
 import { useCart } from "../context/CartContext";
 import AuthModal from "../components/AuthModal";
@@ -144,6 +144,7 @@ const handleLogout = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   // Trạng thái lỗi khi gọi API (Error)
   const [error, setError] = useState<string | null>(null);
+  const productsRequestRef = useRef<AbortController | null>(null);
 
   // Danh mục đang được chọn để lọc (Tất cả, Cà phê, Trà trái cây, Khác)
   const [selectedCategory, setSelectedCategory] = useState<string>("Tất cả");
@@ -187,8 +188,18 @@ const handleLogout = () => {
    *  - Các món còn lại -> 'Khác'
    */
   const fetchProducts = useCallback(async () => {
+    // A newer refresh supersedes any pending request, including its state updates.
+    productsRequestRef.current?.abort();
+    const controller = new AbortController();
+    productsRequestRef.current = controller;
+    setIsLoading(true);
+    setError(null);
+
     try {
-      const response = await fetch(`${API_URL}/products`);
+      const response = await fetch(`${API_URL}/products`, {
+        signal: controller.signal,
+        cache: "no-store",
+      });
 
       if (!response.ok) {
         throw new Error(
@@ -232,8 +243,12 @@ const handleLogout = () => {
         };
       });
 
-      setProducts(mappedProducts);
+      if (productsRequestRef.current === controller && !controller.signal.aborted) {
+        setProducts(mappedProducts);
+      }
     } catch (err: unknown) {
+      if (productsRequestRef.current !== controller || controller.signal.aborted) return;
+
       const errorMessage =
         err instanceof Error
           ? err.message
@@ -241,9 +256,26 @@ const handleLogout = () => {
       console.error("Lỗi khi tải dữ liệu từ Backend:", err);
       setError(errorMessage);
     } finally {
-      setIsLoading(false);
+      if (productsRequestRef.current === controller) {
+        productsRequestRef.current = null;
+        setIsLoading(false);
+      }
     }
   }, []);
+
+  const handleReloadProducts = () => {
+    // The ref also blocks repeated clicks before React renders disabled buttons.
+    if (productsRequestRef.current) return;
+    void fetchProducts();
+  };
+
+  const handleTestEmpty = () => {
+    productsRequestRef.current?.abort();
+    productsRequestRef.current = null;
+    setError(null);
+    setIsLoading(false);
+    setProducts([]);
+  };
 
 // giữ trạng thái đăng nhập khi mở lại trang
   useEffect(() => {
@@ -259,6 +291,10 @@ const handleLogout = () => {
     // The request updates page state after its asynchronous response resolves.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProducts();
+    return () => {
+      productsRequestRef.current?.abort();
+      productsRequestRef.current = null;
+    };
   }, [fetchProducts]);
 
   /**
@@ -559,7 +595,8 @@ const handleLogout = () => {
     <div className="flex items-center gap-1.5">
       <button
         type="button"
-        onClick={fetchProducts}
+        onClick={handleReloadProducts}
+        disabled={isLoading}
         className="px-2 py-0.5 rounded-md bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-[10px] font-medium transition-colors cursor-pointer"
         title="Tải lại dữ liệu từ Backend API"
       >
@@ -567,7 +604,7 @@ const handleLogout = () => {
       </button>
       <button
         type="button"
-        onClick={() => setProducts([])}
+        onClick={handleTestEmpty}
         className="px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-medium transition-colors cursor-pointer"
         title="Giả lập danh sách rỗng để nghiệm thu Empty state"
       >
@@ -699,7 +736,8 @@ const handleLogout = () => {
               </p>
               <button
                 type="button"
-                onClick={fetchProducts}
+                onClick={handleReloadProducts}
+                disabled={isLoading}
                 className="mt-4 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
               >
                 Thử lại ngay
@@ -734,7 +772,8 @@ const handleLogout = () => {
               </p>
               <button
                 type="button"
-                onClick={fetchProducts}
+                onClick={handleReloadProducts}
+                disabled={isLoading}
                 className="mt-4 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
               >
                 Tải lại thực đơn
