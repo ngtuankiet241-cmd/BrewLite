@@ -16,6 +16,8 @@ describe('Optimistic ingredient inventory locking', () => {
   const transaction = vi.fn();
   const tx = {
     product: { findMany: findProducts },
+    sizeOption: { findMany: vi.fn() },
+    topping: { findMany: vi.fn() },
     toppingRecipeIngredient: { findMany: findToppingRecipes },
     ingredient: { findMany: findIngredients, updateMany: updateStock },
     order: { create: createOrder },
@@ -59,6 +61,12 @@ describe('Optimistic ingredient inventory locking', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    tx.sizeOption.findMany.mockResolvedValue([
+      { id: 'S', name: 'Nhỏ', extraPrice: 0 },
+      { id: 'M', name: 'Vừa', extraPrice: 5000 },
+      { id: 'L', name: 'Lớn', extraPrice: 10000 },
+    ]);
+    tx.topping.findMany.mockResolvedValue([]);
     stock = new Prisma.Decimal(10);
     stockVersion = 0;
     findProducts.mockImplementation(() => Promise.resolve([product()]));

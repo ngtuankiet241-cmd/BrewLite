@@ -8,7 +8,7 @@ import { vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PromotionsService } from '../promotions/promotions.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
-import { OrderSizeId, OrderToppingId } from './order.types.js';
+import { OrderSizeId } from './order.types.js';
 import { OrdersService } from './orders.service.js';
 
 describe('Persistent order creation', () => {
@@ -22,6 +22,8 @@ describe('Persistent order creation', () => {
   const tx = {
     order: { create: createOrder },
     product: { findMany: findProducts },
+    sizeOption: { findMany: vi.fn() },
+    topping: { findMany: vi.fn() },
     toppingRecipeIngredient: { findMany: findToppingRecipes },
     ingredient: {
       findMany: findIngredients,
@@ -33,13 +35,21 @@ describe('Persistent order creation', () => {
       productId: 'coffee',
       quantity: 2,
       sizeId: OrderSizeId.Medium,
-      toppingIds: [OrderToppingId.Cheese],
+      toppingIds: ['cheese'],
     },
   ];
   let service: OrdersService;
 
   beforeEach(() => {
     vi.resetAllMocks();
+    tx.sizeOption.findMany.mockResolvedValue([
+      { id: 'S', name: 'Nhỏ', extraPrice: 0 },
+      { id: 'M', name: 'Vừa', extraPrice: 5000 },
+      { id: 'L', name: 'Lớn', extraPrice: 10000 },
+    ]);
+    tx.topping.findMany.mockResolvedValue([
+      { id: 'cheese', name: 'Kem Cheese', extraPrice: 10000 },
+    ]);
     decrementIngredient.mockResolvedValue({ count: 1 });
     findProducts.mockResolvedValue([
       {

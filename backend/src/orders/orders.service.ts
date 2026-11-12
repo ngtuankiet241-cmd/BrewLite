@@ -22,20 +22,13 @@ import {
   OrderItem,
   OrderSizeId,
   OrderStatus,
-  OrderToppingId,
 } from './order.types.js';
 
-const SIZES = {
+const LEGACY_SIZES = {
   [OrderSizeId.Small]: { name: 'Nhỏ', extraPrice: 0 },
   [OrderSizeId.Medium]: { name: 'Vừa', extraPrice: 5000 },
   [OrderSizeId.Large]: { name: 'Lớn', extraPrice: 10000 },
 } satisfies Record<OrderSizeId, { name: string; extraPrice: number }>;
-
-const TOPPINGS = {
-  [OrderToppingId.WhitePearl]: { name: 'Trân châu trắng', extraPrice: 10000 },
-  [OrderToppingId.AloeVera]: { name: 'Thạch nha đam', extraPrice: 10000 },
-  [OrderToppingId.Cheese]: { name: 'Kem Cheese', extraPrice: 10000 },
-} satisfies Record<OrderToppingId, { name: string; extraPrice: number }>;
 
 const MAX_ORDER_AMOUNT = 9_999_999_999;
 const MAX_STOCK_ATTEMPTS = 5;
@@ -162,6 +155,23 @@ export class OrdersService {
     const toppingIds = [
       ...new Set(dto.items.flatMap((item) => item.toppingIds)),
     ];
+    const sizeIds = [...new Set(dto.items.map((item) => item.sizeId))];
+    const [sizes, toppings] = await Promise.all([
+      transaction.sizeOption.findMany({ where: { id: { in: sizeIds } } }),
+      transaction.topping.findMany({ where: { id: { in: toppingIds } } }),
+    ]);
+    const sizesById = new Map(sizes.map((size) => [size.id, size]));
+    const toppingsById = new Map(toppings.map((topping) => [topping.id, topping]));
+    for (const id of sizeIds) {
+      if (!sizesById.has(id)) {
+        throw new BadRequestException(`Kích cỡ không khả dụng: ${id}.`);
+      }
+    }
+    for (const id of toppingIds) {
+      if (!toppingsById.has(id)) {
+        throw new BadRequestException(`Topping không khả dụng: ${id}.`);
+      }
+    }
     const toppingRecipes = await transaction.toppingRecipeIngredient.findMany({
       where: { toppingId: { in: toppingIds } },
       include: {
@@ -222,7 +232,7 @@ export class OrdersService {
         const recipes = toppingRecipesById.get(toppingId);
         if (!recipes?.length) {
           throw new BadRequestException(
-            `Chưa có định mức nguyên liệu cho topping ${TOPPINGS[toppingId].name}.`,
+            `Chưa có định mức nguyên liệu cho topping ${toppingsById.get(toppingId)!.name}.`,
           );
         }
         for (const recipe of recipes) {
@@ -248,8 +258,12 @@ export class OrdersService {
         });
       }
 
-      const size = { id: item.sizeId, ...SIZES[item.sizeId] };
-      const toppings = item.toppingIds.map((id) => ({ id, ...TOPPINGS[id] }));
+      const selectedSize = sizesById.get(item.sizeId)!;
+      const size = { id: selectedSize.id, name: selectedSize.name, extraPrice: selectedSize.extraPrice };
+      const toppings = item.toppingIds.map((id) => {
+        const topping = toppingsById.get(id)!;
+        return { id: topping.id, name: topping.name, extraPrice: topping.extraPrice };
+      });
       const basePrice = product.price.toNumber();
       const unitPrice =
         basePrice +
@@ -448,7 +462,7 @@ export class OrdersService {
           productName: item.product.name,
           basePrice: item.basePrice.toNumber(),
           quantity: item.qty,
-          size: { id: sizeId, ...SIZES[sizeId] },
+          size: { id: sizeId, ...LEGACY_SIZES[sizeId] },
           toppings: item.toppings as unknown as OrderItem['toppings'],
           unitPrice: item.unitPrice.toNumber(),
           lineTotal: item.lineTotal.toNumber(),

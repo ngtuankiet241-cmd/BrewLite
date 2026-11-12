@@ -14,7 +14,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { OrderSizeId, OrderToppingId } from '../order.types.js';
+import { OrderSizeId } from '../order.types.js';
 
 export class CreateOrderItemDto {
   @IsString()
@@ -31,8 +31,10 @@ export class CreateOrderItemDto {
 
   @IsArray()
   @ArrayUnique()
-  @IsEnum(OrderToppingId, { each: true })
-  toppingIds!: OrderToppingId[];
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(100, { each: true })
+  toppingIds!: string[];
 }
 
 export class CreateOrderDto {

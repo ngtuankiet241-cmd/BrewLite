@@ -3,6 +3,7 @@ export interface Product {
   name: string;
   price: number;
   imageUrl: string;
+  category: string;
   stock: number;
   stockBySize: Record<'S' | 'M' | 'L', number>;
 }

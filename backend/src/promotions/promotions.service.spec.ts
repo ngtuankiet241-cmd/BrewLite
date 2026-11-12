@@ -65,6 +65,10 @@ describe('Promotions and discounted orders', () => {
       product: {
         findMany: findProducts,
       },
+      sizeOption: {
+        findMany: vi.fn().mockResolvedValue([{ id: 'S', name: 'Nhỏ', extraPrice: 0 }]),
+      },
+      topping: { findMany: vi.fn().mockResolvedValue([]) },
       toppingRecipeIngredient: { findMany: findToppingRecipes },
       ingredient: {
         findMany: findIngredients,

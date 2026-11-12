@@ -9,7 +9,11 @@ import { checkoutKey } from "../lib/checkout";
 import { getQuantityError } from "../lib/inventory";
 
 interface CartDrawerProps {
-  products: ReadonlyArray<{ id: string; stock: number }>;
+  products: ReadonlyArray<{ id: string; stock: number; price: number }>;
+  options: {
+    sizes: ReadonlyArray<{ id: string; extraPrice: number }>;
+    toppings: ReadonlyArray<{ id: string; extraPrice: number }>;
+  } | null;
   isOpen: boolean;
   onClose: () => void;
   onOrderCreated: () => void;
@@ -111,6 +115,7 @@ function CartQuantityControl({
 
 export default function CartDrawer({
   products,
+  options,
   isOpen,
   onClose,
   onOrderCreated,
@@ -166,6 +171,18 @@ export default function CartDrawer({
   const invalidQuantities = items.some((item) =>
     Boolean(getQuantityError(quantityInputFor(item), maxQuantityFor(item))),
   );
+  const stalePrices = items.some((item) => {
+    const product = products.find((entry) => entry.id === item.id);
+    const size = options?.sizes.find((entry) => entry.id === item.size.id);
+    const toppings = item.toppings.map((choice) =>
+      options?.toppings.find((entry) => entry.id === choice.id),
+    );
+    return !product || !size || toppings.some((topping) => !topping) ||
+      item.size.extraPrice !== size.extraPrice ||
+      item.toppings.some((choice, index) => choice.extraPrice !== toppings[index]?.extraPrice) ||
+      item.price !== product.price + size.extraPrice +
+        toppings.reduce((sum, topping) => sum + (topping?.extraPrice ?? 0), 0);
+  });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -209,7 +226,7 @@ export default function CartDrawer({
   };
 
   const handleCreateOrder = async () => {
-    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion || currentOrderCode || invalidPoints || invalidQuantities) return;
+    if (items.length === 0 || isSubmittingOrder || isValidatingPromotion || currentOrderCode || invalidPoints || invalidQuantities || stalePrices) return;
 
     const token = localStorage.getItem("brewlite_access_token");
     if (!token) {
@@ -569,10 +586,15 @@ export default function CartDrawer({
                     Vui lòng sửa số lượng vượt tồn kho hoặc không hợp lệ trước khi đặt hàng.
                   </p>
                 )}
+                {stalePrices && (
+                  <p role="alert" className="text-xs text-rose-700">
+                    Giá hoặc tùy chọn trong giỏ đã thay đổi. Vui lòng xóa món và thêm lại từ thực đơn.
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={handleCreateOrder}
-                  disabled={isSubmittingOrder || isValidatingPromotion || invalidPoints || invalidQuantities}
+                  disabled={isSubmittingOrder || isValidatingPromotion || invalidPoints || invalidQuantities || stalePrices}
                   className="w-full rounded-2xl bg-emerald-800 px-5 py-3.5 text-sm font-extrabold text-white disabled:opacity-70"
                 >
                   {isSubmittingOrder ? "Đang tạo đơn..." : "Tiến hành đặt hàng"}

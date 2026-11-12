@@ -6,7 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { vi } from 'vitest';
-import { OrderSizeId, OrderToppingId } from '../src/orders/order.types.js';
+import { OrderSizeId } from '../src/orders/order.types.js';
 import { OrdersModule } from '../src/orders/orders.module.js';
 import { OrdersService } from '../src/orders/orders.service.js';
 import { PromotionsService } from '../src/promotions/promotions.service.js';
@@ -34,7 +34,7 @@ describe('Orders persisted in PostgreSQL', () => {
       productId,
       quantity: 2,
       sizeId: OrderSizeId.Medium,
-      toppingIds: [OrderToppingId.Cheese],
+      toppingIds: ['cheese'],
     },
   ];
   let app: INestApplication<App> | undefined;
@@ -164,7 +164,23 @@ describe('Orders persisted in PostgreSQL', () => {
       expect(saved.discount.toNumber()).toBe(0);
       expect(saved.createdAt.toISOString()).toBe(body.createdAt);
       expect(saved.items).toHaveLength(1);
-      expect(saved.items[0].snapshot).toEqual(body.items[0]);
+      expect(saved.items[0].snapshot).toEqual({
+        ...body.items[0],
+        ingredientsUsed: expect.arrayContaining([
+          {
+            ingredientId: baseIngredientId,
+            name: 'Test coffee base ingredient',
+            unit: 'g',
+            quantity: 2,
+          },
+          {
+            ingredientId: toppingIngredientId,
+            name: 'Test coffee topping ingredient',
+            unit: 'g',
+            quantity: 2,
+          },
+        ]),
+      });
       expect(saved.items[0]).toMatchObject({ productId, size: 'M', qty: 2 });
       expect(saved.items[0].lineTotal.toNumber()).toBe(100000);
       expect(saved.payments).toEqual([]);
