@@ -74,6 +74,7 @@ describe('AppController (e2e)', () => {
           name: 'Cà phê sữa',
           price: 35000,
           imageUrl: expect.any(String),
+          category: expect.any(String),
         }),
       ]),
     );
@@ -83,6 +84,7 @@ describe('AppController (e2e)', () => {
         name: expect.any(String),
         price: expect.any(Number),
         imageUrl: expect.any(String),
+        category: expect.any(String),
         stock: expect.any(Number),
         stockBySize: {
           S: expect.any(Number),
@@ -90,6 +92,94 @@ describe('AppController (e2e)', () => {
           L: expect.any(Number),
         },
       });
+    }
+  });
+
+  it('/products/:id (GET) returns the same product as the menu and 404 for an unknown id', async () => {
+    const menu = await request(app.getHttpServer()).get('/products').expect(200);
+    const detail = await request(app.getHttpServer())
+      .get('/products/coffee-milk')
+      .expect(200);
+    expect(detail.body).toEqual(
+      menu.body.find((product: { id: string }) => product.id === 'coffee-milk'),
+    );
+    await request(app.getHttpServer())
+      .get('/products/nonexistent-product')
+      .expect(404);
+  });
+
+  it('uses database catalog options and preserves the price snapshot after changes', async () => {
+    const db = app.get(PrismaService);
+    const toppingId = `test-topping-${randomUUID()}`;
+    const ingredientId = `${toppingId}-ingredient`;
+    const originalSize = await db.sizeOption.findUniqueOrThrow({ where: { id: 'M' } });
+    const inventory = await createTestProduct(db, {
+      id: checkoutProductId,
+      name: 'Catalog test coffee',
+      price: 35000,
+      stock: 10,
+    });
+    inventoryIds = [inventory.baseIngredientId, inventory.toppingIngredientId];
+    try {
+      await db.product.update({
+        where: { id: checkoutProductId },
+        data: { categoryId: 'coffee' },
+      });
+      await db.sizeOption.update({
+        where: { id: 'M' },
+        data: { extraPrice: 8000 },
+      });
+      await db.topping.create({
+        data: { id: toppingId, name: 'Test topping', extraPrice: 7000, sortOrder: 20 },
+      });
+      await db.ingredient.create({
+        data: { id: ingredientId, name: 'Test topping ingredient', unit: 'g', stock: 100 },
+      });
+      await db.toppingRecipeIngredient.create({
+        data: { toppingId, ingredientId, quantity: 1 },
+      });
+
+      const options = await request(app.getHttpServer()).get('/products/options').expect(200);
+      expect(options.body.sizes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'M', extraPrice: 8000 }),
+      ]));
+      expect(options.body.toppings).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: toppingId, extraPrice: 7000 }),
+      ]));
+      const product = await request(app.getHttpServer())
+        .get(`/products/${checkoutProductId}`).expect(200);
+      expect(product.body.category).toBe('Cà phê');
+
+      const order = await request(app.getHttpServer())
+        .post('/orders')
+        .auth(token, { type: 'bearer' })
+        .send({ items: [{ productId: checkoutProductId, quantity: 1, sizeId: 'M', toppingIds: [toppingId] }] })
+        .expect(201);
+      createdOrderCodes.push(order.body.orderCode);
+      expect(order.body.totalAmount).toBe(50000);
+      expect(order.body.items[0].toppings).toEqual([
+        { id: toppingId, name: 'Test topping', extraPrice: 7000 },
+      ]);
+
+      await db.topping.update({ where: { id: toppingId }, data: { name: 'Changed', extraPrice: 1000 } });
+      const history = await request(app.getHttpServer())
+        .get('/orders/me').auth(token, { type: 'bearer' }).expect(200);
+      expect(history.body[0].items[0].toppings).toEqual([
+        { id: toppingId, name: 'Test topping', extraPrice: 7000 },
+      ]);
+      await request(app.getHttpServer())
+        .post('/orders')
+        .auth(token, { type: 'bearer' })
+        .send({ items: [{ productId: checkoutProductId, quantity: 1, sizeId: 'M', toppingIds: ['missing-topping'] }] })
+        .expect(400);
+    } finally {
+      await db.sizeOption.update({
+        where: { id: 'M' },
+        data: { name: originalSize.name, extraPrice: originalSize.extraPrice },
+      });
+      await db.toppingRecipeIngredient.deleteMany({ where: { toppingId } });
+      await db.ingredient.deleteMany({ where: { id: ingredientId } });
+      await db.topping.deleteMany({ where: { id: toppingId } });
     }
   });
 
@@ -152,6 +242,45 @@ describe('AppController (e2e)', () => {
         }),
       ]),
     );
+    const detail = await request(app.getHttpServer())
+      .get(`/products/${checkoutProductId}`)
+      .expect(200);
+    expect(detail.body.stockBySize).toEqual({ S: 0, M: 0, L: 0 });
+
+    await request(app.getHttpServer()).get('/orders/me').expect(401);
+    const history = await request(app.getHttpServer())
+      .get('/orders/history')
+      .auth(token, { type: 'bearer' })
+      .expect(200);
+    const myOrders = await request(app.getHttpServer())
+      .get('/orders/me')
+      .auth(token, { type: 'bearer' })
+      .expect(200);
+    expect(myOrders.body).toEqual(history.body);
+    expect(myOrders.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ orderCode: response.body.orderCode }),
+      ]),
+    );
+
+    const otherUserId = `checkout-other-${randomUUID()}`;
+    await app.get(PrismaService).user.create({
+      data: {
+        id: otherUserId,
+        email: `${otherUserId}@example.invalid`,
+        passwordHash: 'not-a-login',
+      },
+    });
+    try {
+      const otherToken = app.get(JwtService).sign({ sub: otherUserId });
+      const otherOrders = await request(app.getHttpServer())
+        .get('/orders/me')
+        .auth(otherToken, { type: 'bearer' })
+        .expect(200);
+      expect(otherOrders.body).toEqual([]);
+    } finally {
+      await app.get(PrismaService).user.delete({ where: { id: otherUserId } });
+    }
   });
 
   it('/orders (POST) rejects an empty cart', () => {

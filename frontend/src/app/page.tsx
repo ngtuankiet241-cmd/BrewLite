@@ -20,6 +20,7 @@ export interface BackendProduct {
   name: string;
   price: number;
   imageUrl: string;
+  category: string;
   stock: number;
   stockBySize: Record<"S" | "M" | "L", number>;
 }
@@ -69,25 +70,11 @@ export interface AddedCartItemSummary {
 /**
  * Danh sách các danh mục thức uống để lọc
  */
-export const CATEGORIES = ["Tất cả", "Cà phê", "Trà trái cây", "Khác"] as const;
-
-/**
- * Danh sách tùy chọn kích cỡ (Size): Nhỏ, Vừa, Lớn
- */
-export const SIZE_OPTIONS: SizeOption[] = [
-  { id: "S", name: "Nhỏ", extraPrice: 0 },
-  { id: "M", name: "Vừa", extraPrice: 5000 },
-  { id: "L", name: "Lớn", extraPrice: 10000 },
-];
-
-/**
- * Danh sách tùy chọn Topping: Trân châu trắng, Thạch nha đam, Kem Cheese...
- */
-export const TOPPING_OPTIONS: ToppingOption[] = [
-  { id: "white_pearl", name: "Trân châu trắng", extraPrice: 10000 },
-  { id: "aloe_vera", name: "Thạch nha đam", extraPrice: 10000 },
-  { id: "cheese", name: "Kem Cheese", extraPrice: 10000 },
-];
+type CatalogOptions = {
+  categories: { id: string; name: string }[];
+  sizes: SizeOption[];
+  toppings: ToppingOption[];
+};
 
 // ============================================================================
 // 3. HÀM TIỆN ÍCH (HELPERS)
@@ -140,6 +127,7 @@ const handleLogout = () => {
 
   // Quản lý danh sách sản phẩm lấy từ Backend API
   const [products, setProducts] = useState<Product[]>([]);
+  const [options, setOptions] = useState<CatalogOptions | null>(null);
   // Trạng thái đang tải dữ liệu (Loading)
   const [isLoading, setIsLoading] = useState<boolean>(true);
   // Trạng thái lỗi khi gọi API (Error)
@@ -158,13 +146,14 @@ const handleLogout = () => {
   // Sản phẩm đang được chọn mở modal tùy chọn (null nếu modal đóng)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   // Kích cỡ được chọn (mặc định là Size Nhỏ)
-  const [selectedSize, setSelectedSize] = useState<SizeOption>(SIZE_OPTIONS[0]);
+  const [selectedSizeId, setSelectedSizeId] = useState<SizeOption["id"]>("S");
+  const selectedSize = options?.sizes.find((size) => size.id === selectedSizeId);
   // Danh sách ID của các topping đã tick chọn (checkbox đa chọn)
   const [selectedToppings, setSelectedToppings] = useState<string[]>([]);
   // Số lượng món được chọn (mặc định là 1)
   const [quantity, setQuantity] = useState<number>(1);
   const [quantityInput, setQuantityInput] = useState("1");
-  const selectedStock = selectedProduct
+  const selectedStock = selectedProduct && selectedSize
     ? products.find((product) => product.id === selectedProduct.id)?.stockBySize[selectedSize.id] ??
       selectedProduct.stockBySize[selectedSize.id]
     : 0;
@@ -180,13 +169,6 @@ const handleLogout = () => {
   const [addedItemSummary, setAddedItemSummary] =
     useState<AddedCartItemSummary | null>(null);
 
-  /**
-   * Gọi API NestJS qua API_URL
-   * Phân loại category theo tên:
-   *  - Chứa "cà phê", "americano", "cappuccino" -> 'Cà phê'
-   *  - Chứa "trà", "tea" -> 'Trà trái cây'
-   *  - Các món còn lại -> 'Khác'
-   */
   const fetchProducts = useCallback(async () => {
     // A newer refresh supersedes any pending request, including its state updates.
     productsRequestRef.current?.abort();
@@ -196,55 +178,50 @@ const handleLogout = () => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_URL}/products`, {
-        signal: controller.signal,
-        cache: "no-store",
-      });
+      const [response, optionsResponse] = await Promise.all([
+        fetch(`${API_URL}/products`, { signal: controller.signal, cache: "no-store" }),
+        fetch(`${API_URL}/products/options`, { signal: controller.signal, cache: "no-store" }),
+      ]);
 
-      if (!response.ok) {
+      if (!response.ok || !optionsResponse.ok) {
         throw new Error(
-          `Không thể tải thực đơn (Mã lỗi ${response.status}: ${response.statusText})`
+          `Không thể tải thực đơn hoặc tùy chọn (HTTP ${!response.ok ? response.status : optionsResponse.status}).`
         );
       }
 
       const data: BackendProduct[] = await response.json();
+      const catalog: CatalogOptions = await optionsResponse.json();
+      if (
+        !Array.isArray(catalog.categories) || !Array.isArray(catalog.sizes) ||
+        !Array.isArray(catalog.toppings) ||
+        !["S", "M", "L"].every((id) => catalog.sizes.some((size) => size.id === id))
+      ) {
+        throw new Error("Cấu hình thực đơn không hợp lệ.");
+      }
 
-      // Bổ sung category theo tên và thiết lập giá trị mặc định cho description
       const mappedProducts: Product[] = data.map((item) => {
-        const lowerName = item.name.toLowerCase();
-
-        let category: string;
         let defaultDescription: string;
 
-        if (
-          lowerName.includes("cà phê") ||
-          lowerName.includes("americano") ||
-          lowerName.includes("cappuccino")
-        ) {
-          category = "Cà phê";
+        if (item.category === "Cà phê") {
           defaultDescription =
             "Hương vị cà phê Robusta & Arabica đậm đà, thơm nồng truyền thống";
-        } else if (lowerName.includes("trà") || lowerName.includes("tea")) {
-          category = "Trà trái cây";
+        } else if (item.category === "Trà trái cây") {
           defaultDescription =
             "Trà tươi thượng hạng thanh mát, sảng khoái từng ngụm";
         } else {
-          category = "Khác";
           defaultDescription =
             "Thức uống đặc biệt thơm ngon, tươi mát sảng khoái";
         }
 
         return {
           ...item,
-          category,
-          description:
-            (item as unknown as { description?: string }).description ??
-            defaultDescription,
+          description: defaultDescription,
         };
       });
 
       if (productsRequestRef.current === controller && !controller.signal.aborted) {
         setProducts(mappedProducts);
+        setOptions(catalog);
       }
     } catch (err: unknown) {
       if (productsRequestRef.current !== controller || controller.signal.aborted) return;
@@ -302,9 +279,9 @@ const handleLogout = () => {
    * Khởi tạo lại các tùy chọn mặc định (Size Nhỏ, chưa chọn topping nào, số lượng = 1)
    */
   const handleOpenDetailModal = (product: Product) => {
-    if (product.stock <= 0) return;
+    if (product.stock <= 0 || !options) return;
     setSelectedProduct(product);
-    setSelectedSize(SIZE_OPTIONS[0]);
+    setSelectedSizeId("S");
     setSelectedToppings([]);
     setQuantity(1);
     setQuantityInput("1");
@@ -362,11 +339,11 @@ const handleLogout = () => {
    * Công thức: Giá gốc + Giá size + Giá các topping đã tick
    */
   const calculateUnitPrice = (): number => {
-    if (!selectedProduct) return 0;
+    if (!selectedProduct || !selectedSize || !options) return 0;
     const basePrice = selectedProduct.price;
     const sizePrice = selectedSize.extraPrice;
     const toppingsPrice = selectedToppings.reduce((total, id) => {
-      const found = TOPPING_OPTIONS.find((t) => t.id === id);
+      const found = options.toppings.find((t) => t.id === id);
       return total + (found ? found.extraPrice : 0);
     }, 0);
 
@@ -391,14 +368,14 @@ const handleLogout = () => {
       return;
     }
 
-    if (!selectedProduct || !isHydrated || quantityError) return;
+    if (!selectedProduct || !selectedSize || !options || !isHydrated || quantityError) return;
 
     const quantityToAdd = Number(quantityInput);
     setQuantity(quantityToAdd);
     setQuantityInput(String(quantityToAdd));
     const totalPrice = calculateTotalPrice(quantityToAdd);
     const toppingNames = selectedToppings
-      .map((id) => TOPPING_OPTIONS.find((t) => t.id === id)?.name)
+      .map((id) => options.toppings.find((t) => t.id === id)?.name)
       .filter((name): name is string => Boolean(name));
 
     // 1. Lưu thông tin tóm tắt món vừa thêm vào state
@@ -422,7 +399,7 @@ const handleLogout = () => {
         extraPrice: selectedSize.extraPrice,
       },
       toppings: selectedToppings
-        .map((id) => TOPPING_OPTIONS.find((topping) => topping.id === id))
+        .map((id) => options.toppings.find((topping) => topping.id === id))
         .filter((topping): topping is ToppingOption => Boolean(topping))
         .map(({ id, name, extraPrice }) => ({ id, name, extraPrice })),
       imageUrl: selectedProduct.imageUrl,
@@ -660,7 +637,7 @@ const handleLogout = () => {
         {/* ------------------------------------------------------------------ */}
         <div className="px-3.5 pt-3 pb-1">
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
-            {CATEGORIES.map((category) => {
+            {["Tất cả", ...(options?.categories.map((category) => category.name) ?? [])].map((category) => {
               const isActive = selectedCategory === category;
               return (
                 <button
@@ -930,6 +907,7 @@ const handleLogout = () => {
 
         <CartDrawer
           products={products}
+          options={options}
           isOpen={isCartOpen}
           onClose={() => setIsCartOpen(false)}
           onOrderCreated={fetchProducts}
@@ -938,7 +916,7 @@ const handleLogout = () => {
         {/* ------------------------------------------------------------------ */}
         {/* MODAL / BOTTOM SHEET CHI TIẾT VÀ TÙY CHỌN MÓN                      */}
         {/* ------------------------------------------------------------------ */}
-        {selectedProduct && (
+        {selectedProduct && selectedSize && options && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
             {/* Lớp nền làm mờ (Backdrop Blur) */}
             <div
@@ -1012,13 +990,13 @@ const handleLogout = () => {
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">
-                    {SIZE_OPTIONS.map((size) => {
+                    {options.sizes.map((size) => {
                       const isSelected = selectedSize.id === size.id;
                       return (
                         <button
                           key={size.id}
                           type="button"
-                          onClick={() => setSelectedSize(size)}
+                          onClick={() => setSelectedSizeId(size.id)}
                           className={`py-2 px-1 rounded-xl text-center border transition-all duration-200 flex flex-col items-center justify-center cursor-pointer ${
                             isSelected
                               ? "bg-emerald-800 border-emerald-800 text-white shadow-sm ring-2 ring-emerald-700/20"
@@ -1062,7 +1040,7 @@ const handleLogout = () => {
                   </div>
 
                   <div className="space-y-2">
-                    {TOPPING_OPTIONS.map((topping) => {
+                    {options.toppings.map((topping) => {
                       const isChecked = selectedToppings.includes(topping.id);
                       return (
                         <label

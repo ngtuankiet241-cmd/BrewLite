@@ -21,7 +21,7 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   // Lấy lịch sử đặt hàng của người dùng đang đăng nhập
-  @Get('history')
+  @Get(['history', 'me'])
   getHistory(@Req() request: AuthenticatedRequest) {
     return this.ordersService.getHistory(request.user.sub);
   }

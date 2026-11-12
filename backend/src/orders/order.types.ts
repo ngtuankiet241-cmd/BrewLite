@@ -4,12 +4,6 @@ export enum OrderSizeId {
   Large = 'L',
 }
 
-export enum OrderToppingId {
-  WhitePearl = 'white_pearl',
-  AloeVera = 'aloe_vera',
-  Cheese = 'cheese',
-}
-
 export type OrderStatus =
   | 'PENDING'
   | 'PAID'

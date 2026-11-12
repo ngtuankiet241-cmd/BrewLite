@@ -12,6 +12,17 @@ const prisma = new PrismaClient();
 
 const products = PRODUCTS;
 
+function initialCategory(name: string): string {
+  const lowerName = name.toLowerCase();
+  if (['cà phê', 'americano', 'cappuccino'].some((term) => lowerName.includes(term))) {
+    return 'coffee';
+  }
+  if (lowerName.includes('trà') || lowerName.includes('tea')) {
+    return 'fruit-tea';
+  }
+  return 'other';
+}
+
 async function main() {
   for (const product of products) {
     await prisma.product.upsert({
@@ -21,7 +32,7 @@ async function main() {
         price: product.price,
         imageUrl: product.imageUrl,
       },
-      create: product,
+      create: { ...product, categoryId: initialCategory(product.name) },
     });
   }
 
