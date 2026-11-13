@@ -15,8 +15,9 @@ import {
   awardPoints,
   redeemPoints,
   redemptionDiscount,
-  refundPoints,
 } from '../loyalty/loyalty.js';
+import { applyCancellation } from './cancellation.js';
+import { refundSummary } from '../payments/simulated-refunds.js';
 import {
   Order,
   OrderItem,
@@ -45,23 +46,25 @@ export class OrdersService {
   async updateStatus(
     orderCode: string,
     nextStatus: OrderStatus,
+    options: { actorId?: string; reason?: string; expectedStatus?: OrderStatus } = {},
   ): Promise<Pick<Order, 'orderCode' | 'status'>> {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Order"
+        WHERE "id" = ${orderCode} OR "orderCode" = ${orderCode} FOR UPDATE`;
       const order = await tx.order.findFirst({
         where: { OR: [{ id: orderCode }, { orderCode }] },
-        select: {
-          id: true,
-          status: true,
-          orderCode: true,
-          userId: true,
-          total: true,
-          pointsRedeemed: true,
-        },
+        include: { items: true, payments: true },
       });
       if (!order) {
         throw new NotFoundException('Không tìm thấy đơn hàng.');
       }
 
+      if (order.status === 'CANCELLED' && nextStatus === 'CANCELLED') {
+        return { orderCode: order.orderCode, status: nextStatus };
+      }
+      if (options.expectedStatus && options.expectedStatus !== order.status) {
+        throw new ConflictException('Đơn hàng đã thay đổi. Vui lòng tải lại danh sách.');
+      }
       assertTransition(order.status, nextStatus);
       const result = await tx.order.updateMany({
         where: { id: order.id, status: order.status },
@@ -73,7 +76,7 @@ export class OrdersService {
         );
       }
       if (nextStatus === 'PAID') await awardPoints(tx, order);
-      if (nextStatus === 'CANCELLED') await refundPoints(tx, order);
+      if (nextStatus === 'CANCELLED') await applyCancellation(tx, order, options.actorId, options.reason);
       return { orderCode: order.orderCode, status: nextStatus };
     });
   }
@@ -421,6 +424,7 @@ export class OrdersService {
       where: { userId },
       orderBy: { createdAt: 'desc' },
       include: {
+        refund: true,
         items: { include: { product: { select: { name: true } } } },
       },
     });
@@ -436,6 +440,14 @@ export class OrdersService {
       pointsDiscount: order.pointsDiscount.toNumber(),
       pointsEarned: order.pointsEarned,
       pointsRefunded: order.pointsRefundedAt !== null,
+      pointsReversed: order.pointsReversedAt !== null,
+      refund: refundSummary(order.refund),
+      cancellation: order.cancelledAt ? {
+        reason: order.cancellationReason,
+        cancelledAt: order.cancelledAt.toISOString(),
+        inventoryStatus: order.inventoryRestoreStatus,
+        promotionReleased: order.promotionReleasedAt !== null,
+      } : null,
       createdAt: order.createdAt.toISOString(),
       items: order.items.map((item) => {
         const snapshot = item.snapshot as unknown as Partial<OrderItem> | null;

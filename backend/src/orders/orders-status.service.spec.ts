@@ -22,6 +22,8 @@ describe('Persistent order status transitions', () => {
       id: orderCode,
       orderCode,
       status: 'PENDING',
+      items: [],
+      payments: [],
     });
     updateOrder.mockResolvedValue({ count: 1 });
     service = new OrdersService(
@@ -29,7 +31,8 @@ describe('Persistent order status transitions', () => {
         order: { findFirst: findOrder, updateMany: updateOrder },
         $transaction: (run: (tx: unknown) => unknown) =>
           run({
-            order: { findFirst: findOrder, updateMany: updateOrder },
+            $queryRaw: vi.fn(),
+            order: { findFirst: findOrder, updateMany: updateOrder, update: vi.fn() },
           }),
       } as unknown as PrismaService,
       {} as PromotionsService,
@@ -68,14 +71,7 @@ describe('Persistent order status transitions', () => {
     }
     expect(findOrder).toHaveBeenCalledWith({
       where: { OR: [{ id: orderCode }, { orderCode }] },
-      select: {
-        id: true,
-        status: true,
-        orderCode: true,
-        userId: true,
-        total: true,
-        pointsRedeemed: true,
-      },
+      include: { items: true, payments: true },
     });
   });
 
@@ -86,7 +82,7 @@ describe('Persistent order status transitions', () => {
     ['PAID', 'CANCELLED'],
     ['PAYMENT_FAILED', 'CANCELLED'],
   ])('persists the diagram branch %s -> %s', async (from, to) => {
-    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: from });
+    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: from, items: [], payments: [] });
     await expect(service.updateStatus(orderCode, to)).resolves.toEqual({
       orderCode,
       status: to,

@@ -2,6 +2,7 @@
 import { Module } from '@nestjs/common';
 
 import { OrdersController } from './orders.controller.js';
+import { StaffOrdersController } from './staff-orders.controller.js';
 import { OrdersService } from './orders.service.js';
 
 import { PrismaModule } from '../prisma/prisma.module.js';
@@ -14,7 +15,7 @@ import { PromotionsModule } from '../promotions/promotions.module.js';
     AuthModule,
     PromotionsModule,
   ],
-  controllers: [OrdersController],
+  controllers: [OrdersController, StaffOrdersController],
   providers: [OrdersService],
 })
 export class OrdersModule {}

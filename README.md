@@ -52,6 +52,10 @@ The API listens at `http://localhost:3001`.
 
 Terminal 2 - frontend:
 
+For local development, copy `frontend/.env.example` to `frontend/.env.local`
+once so the browser uses the local backend. Restart or rebuild Next.js after
+changing `NEXT_PUBLIC_API_URL`.
+
 ```powershell
 npm.cmd --prefix frontend run dev
 ```
@@ -153,6 +157,10 @@ passwords, JWT secrets, or payment credentials.
 
 For SePay Sandbox configuration and payment troubleshooting, see
 [the SePay setup guide](docs/sepay-sandbox.md).
+
+Staff can cancel orders before preparation using `/staff`. Cancellation simulates
+refunds, restores ingredient stock and promotion usage, returns redeemed points,
+and reverses earned points. See [setup, staff access and cancellation rules](docs/order-cancellation.md).
 
 Customers earn 1 point per 1,000 VND paid and can redeem each point for a 10 VND
 discount in the cart. See [the loyalty rules and API](docs/loyalty-points.md).

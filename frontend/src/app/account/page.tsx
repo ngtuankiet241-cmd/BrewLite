@@ -126,6 +126,8 @@ export default function AccountPage() {
                 {" "}1 điểm đổi {user.loyaltyPolicy.pointValue.toLocaleString("vi-VN")}đ giảm giá cho đơn tiếp theo.
               </p>
               <p className="mt-2 text-sm text-emerald-100">Có thể quy đổi {(user.loyaltyPoints * user.loyaltyPolicy.pointValue).toLocaleString("vi-VN")}đ.</p>
+              {user.loyaltyDebt > 0 && <p className="mt-2 text-sm text-amber-100">Còn {user.loyaltyDebt} điểm cần thu hồi từ đơn đã hủy. Điểm được cộng hoặc trả lại sau này sẽ bù khoản này trước.</p>}
+              {(user.role === "STAFF" || user.role === "ADMIN") && <Link href="/staff" className="mt-4 inline-block rounded-xl bg-white px-4 py-2 text-sm font-semibold text-emerald-950">Quản lý đơn hàng</Link>}
             </div>
 
             <Link

@@ -25,6 +25,11 @@ describe('SePay IPN acknowledgement', () => {
       order_currency: 'VND',
       order_amount: '35000.00',
     },
+    transaction: {
+      transaction_status: 'APPROVED',
+      transaction_currency: 'VND',
+      transaction_amount: '35000',
+    },
   };
 
   beforeEach(async () => {
@@ -40,6 +45,7 @@ describe('SePay IPN acknowledgement', () => {
     updateOrder.mockResolvedValue({ count: 1 });
     transaction.mockImplementation((run: (tx: unknown) => unknown) =>
       run({
+        $queryRaw: vi.fn(),
         order: { findUnique: findOrder, updateMany: updateOrder },
         payment: { update: updatePayment },
       }),

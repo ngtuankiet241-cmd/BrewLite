@@ -10,6 +10,8 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { withIdempotency } from '../prisma/idempotency.js';
 import { CreatePaymentDto } from './dto/create-payment.dto.js';
 import { awardPoints } from '../loyalty/loyalty.js';
+import { refundSummary, simulateRefund } from './simulated-refunds.js';
+import { timingSafeEqual } from 'node:crypto';
 
 type SePayIpn = {
   notification_type?: string;
@@ -164,10 +166,15 @@ export class PaymentsService {
   async handleIpn(secretHeader: string | undefined, body: SePayIpn) {
     const expectedSecret = this.config.get<string>('SEPAY_IPN_SECRET_KEY');
 
-    if (!expectedSecret || !secretHeader || secretHeader !== expectedSecret) {
+    if (!expectedSecret || !secretHeader ||
+        Buffer.byteLength(secretHeader) !== Buffer.byteLength(expectedSecret) ||
+        !timingSafeEqual(Buffer.from(secretHeader), Buffer.from(expectedSecret))) {
       throw new UnauthorizedException('IPN Secret Key không hợp lệ.');
     }
 
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Dữ liệu IPN không hợp lệ.');
+    }
     if (body.notification_type !== 'ORDER_PAID') {
       return { received: true, ignored: true };
     }
@@ -178,15 +185,20 @@ export class PaymentsService {
     const amount = Number(body.order?.order_amount);
 
     if (
-      !invoice ||
+      typeof invoice !== 'string' || !invoice.trim() ||
       orderStatus !== 'CAPTURED' ||
       currency !== 'VND' ||
-      !Number.isFinite(amount)
+      !Number.isSafeInteger(amount) || amount <= 0 ||
+      body.transaction?.transaction_status !== 'APPROVED' ||
+      body.transaction.transaction_currency !== 'VND' ||
+      Number(body.transaction.transaction_amount) !== amount
     ) {
       throw new BadRequestException('Dữ liệu IPN không hợp lệ.');
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Serialize callbacks with staff cancellation and checkout initialization.
+      await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "orderCode" = ${invoice} FOR UPDATE`;
       const order = await tx.order.findUnique({
         where: { orderCode: invoice },
         include: { payments: true },
@@ -213,7 +225,7 @@ export class PaymentsService {
         return { received: true, alreadyProcessed: true };
       }
 
-      if (!['PENDING', 'PAYMENT_FAILED'].includes(order.status)) {
+      if (!['PENDING', 'PAYMENT_FAILED', 'CANCELLED'].includes(order.status)) {
         throw new BadRequestException(
           'Trạng thái đơn hàng không cho phép xác nhận thanh toán.',
         );
@@ -227,6 +239,17 @@ export class PaymentsService {
         throw new BadRequestException(
           'Không tìm thấy giao dịch SePay hợp lệ cho đơn hàng.',
         );
+      }
+
+      if (order.status === 'CANCELLED') {
+        // A customer may have paid on an already-open checkout page. Preserve
+        // cancellation, record the payment, and simulate its refund once.
+        const captured = await tx.payment.update({
+          where: { id: payment.id },
+          data: { status: 'SUCCEEDED' },
+        });
+        await simulateRefund(tx, captured);
+        return { received: true, refunded: true, simulated: true };
       }
 
       // Claim the transition first, then settle the payment and points together.
@@ -259,6 +282,7 @@ export class PaymentsService {
     const order = await this.prisma.order.findFirst({
       where: { orderCode, userId },
       include: {
+        refund: true,
         payments: {
           orderBy: { id: 'desc' },
           take: 1,
@@ -277,6 +301,10 @@ export class PaymentsService {
       pointsEarned: order.pointsEarned,
       pointsRedeemed: order.pointsRedeemed,
       pointsDiscount: Number(order.pointsDiscount),
+      pointsRefunded: order.pointsRefundedAt !== null,
+      pointsReversed: order.pointsReversedAt !== null,
+      refund: refundSummary(order.refund),
+      cancellationReason: order.cancellationReason,
     };
   }
 }

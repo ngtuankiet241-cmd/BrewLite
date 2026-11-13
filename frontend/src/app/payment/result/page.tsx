@@ -5,9 +5,10 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCart } from "../../../context/CartContext";
 import { API_URL } from "../../../config/api";
+import { refundMessage, type RefundSummary } from "../../../lib/refunds";
 
 type PaymentResult = {
-  status: "loading" | "success" | "pending" | "failed" | "error";
+  status: "loading" | "success" | "pending" | "failed" | "error" | "cancelled";
   message: string;
 };
 
@@ -16,12 +17,22 @@ function getPaymentResult(data: unknown): PaymentResult {
     status?: string;
     paymentStatus?: string;
     pointsEarned?: number;
+    orderStatus?: string;
+    refund?: RefundSummary | null;
+    cancellationReason?: string | null;
     order?: {
       status?: string;
       paymentStatus?: string;
     };
     message?: string;
   };
+
+  if (result?.orderStatus === "CANCELLED") {
+    return {
+      status: "cancelled",
+      message: `Đơn hàng đã bị hủy.${result.cancellationReason ? ` Lý do: ${result.cancellationReason}.` : ""} ${result.refund ? refundMessage(result.refund) : "Chưa ghi nhận khoản thanh toán cần hoàn. Khoản thanh toán đến sau sẽ được tự động giả lập hoàn tiền."}`,
+    };
+  }
 
   const value = String(
     result?.paymentStatus ??
@@ -160,6 +171,12 @@ function PaymentResultContent() {
       title: "Thanh toán thành công",
       color: "text-emerald-700",
       background: "bg-emerald-50",
+    },
+    cancelled: {
+      icon: "×",
+      title: "Đơn hàng đã hủy",
+      color: "text-stone-700",
+      background: "bg-stone-100",
     },
     pending: {
       icon: "◷",

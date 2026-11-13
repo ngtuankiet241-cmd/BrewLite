@@ -140,6 +140,15 @@ key persistence, conflict responses and tests against PostgreSQL.
 JWT and returns HTTP `401` without a valid token. `GET /orders/history` remains
 available as an equivalent path for existing clients.
 
+## Confirmed: staff orders and cancellation
+
+Staff APIs are implemented at `GET /staff/orders` and
+`PATCH /staff/orders/:orderCode/status`, protected by JWT and database STAFF/ADMIN
+roles. Cancellation requires `expectedStatus` and `reason` and atomically handles
+inventory, promotions, loyalty and simulated refunds. Customer history and
+payment status include `refund` and cancellation details. See
+[the staff cancellation API](order-cancellation.md#api) for request/response rules.
+
 ## Decisions still needed
 
 | Topic | Current status | Follow-up |

@@ -161,6 +161,11 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
           order_currency: 'VND',
           order_amount: String(amount),
         },
+        transaction: {
+          transaction_status: 'APPROVED',
+          transaction_currency: 'VND',
+          transaction_amount: String(amount),
+        },
       });
 
   it('creates exactly one order when the same Idempotency-Key and body are sent twice', async () => {

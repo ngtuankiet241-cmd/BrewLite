@@ -1,4 +1,5 @@
 import { API_URL } from "../config/api";
+import { isRefundSummary, type RefundSummary } from "./refunds";
 import { isStaffOrderStatus, type StaffActionStatus, type StaffOrderStatus } from "./staff-order-status";
 
 export interface StaffOrderItem {
@@ -14,6 +15,16 @@ export interface StaffOrder {
   total: number;
   createdAt: string;
   items: StaffOrderItem[];
+  refund: RefundSummary | null;
+  cancellation: {
+    reason: string | null;
+    cancelledAt: string;
+    cancelledById: string | null;
+    inventoryStatus: "RESTORED" | "NEEDS_REVIEW";
+    promotionReleased: boolean;
+    pointsReturned: number;
+    pointsReversed: number;
+  } | null;
 }
 
 export interface StaffOrdersResponse {
@@ -22,6 +33,8 @@ export interface StaffOrdersResponse {
 
 export interface UpdateStaffOrderRequest {
   status: StaffActionStatus;
+  expectedStatus: StaffOrderStatus;
+  reason?: string;
 }
 
 export interface UpdateStaffOrderResponse {
@@ -53,7 +66,14 @@ function isOrder(value: unknown): value is StaffOrder {
   return isRecord(value) && typeof value.orderCode === "string" && value.orderCode.length > 0 &&
     isStaffOrderStatus(value.status) && typeof value.total === "number" &&
     Number.isFinite(value.total) && value.total >= 0 && typeof value.createdAt === "string" &&
-    Number.isFinite(Date.parse(value.createdAt)) && Array.isArray(value.items) && value.items.every(isOrderItem);
+    Number.isFinite(Date.parse(value.createdAt)) && Array.isArray(value.items) && value.items.every(isOrderItem) &&
+    isRefundSummary(value.refund) && (value.cancellation === null ||
+      (isRecord(value.cancellation) && (typeof value.cancellation.reason === "string" || value.cancellation.reason === null) &&
+        typeof value.cancellation.cancelledAt === "string" && Number.isFinite(Date.parse(value.cancellation.cancelledAt)) &&
+        (typeof value.cancellation.cancelledById === "string" || value.cancellation.cancelledById === null) &&
+        ["RESTORED", "NEEDS_REVIEW"].includes(String(value.cancellation.inventoryStatus)) &&
+        typeof value.cancellation.promotionReleased === "boolean" &&
+        Number.isSafeInteger(value.cancellation.pointsReturned) && Number.isSafeInteger(value.cancellation.pointsReversed)));
 }
 
 function contractError(): StaffApiError {

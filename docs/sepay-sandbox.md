@@ -1,5 +1,9 @@
 # SePay Sandbox setup
 
+Staff cancellation uses simulated refunds stored inside BrewLite. See
+[cancellation, inventory, promotions and loyalty handling](order-cancellation.md)
+for setup, staff permissions, late IPNs and testing. No refund transfer is sent.
+
 The payment flow uses **SePay Payment Gateway Sandbox** (`sepay-pg-node`), with
 merchant credentials from **Cổng thanh toán**, rather than the bank transaction
 webhook integration. Sandbox payments are simulated.
