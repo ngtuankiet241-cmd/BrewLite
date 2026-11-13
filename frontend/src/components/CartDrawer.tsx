@@ -332,12 +332,29 @@ export default function CartDrawer({
       );
     }
 
-    if (data.method !== "SEPAY_API_V2") {
-      throw new Error("Phiên thanh toán cũ. Vui lòng tạo đơn mới để thanh toán bằng QR.");
+    if (
+      !data.checkoutUrl ||
+      !data.formFields ||
+      typeof data.formFields !== "object"
+    ) {
+      throw new Error("Dữ liệu thanh toán từ server không hợp lệ.");
     }
-    onClose();
-    router.push(`/payment/checkout?orderCode=${encodeURIComponent(currentOrderCode)}`);
-    setIsSubmittingPayment(false);
+
+    // Tạo form POST theo các trường do SDK SePay trả về.
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = data.checkoutUrl;
+
+    for (const [key, value] of Object.entries(data.formFields)) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = key;
+      input.value = String(value ?? "");
+      form.appendChild(input);
+    }
+
+    document.body.appendChild(form);
+    form.submit();
   } catch (error) {
     setCheckoutNotice(
       error instanceof Error
@@ -593,7 +610,7 @@ export default function CartDrawer({
                   disabled={isSubmittingPayment}
                   className="w-full rounded-lg bg-amber-600 px-4 py-3 font-semibold text-white disabled:opacity-50"
                 >
-                  {isSubmittingPayment ? "Đang tạo mã thanh toán..." : "Thanh toán QR (Sandbox)"}
+                  {isSubmittingPayment ? "Đang chuyển đến SePay..." : "Thanh toán với SePay Sandbox"}
                 </button>
               </div>
             )}

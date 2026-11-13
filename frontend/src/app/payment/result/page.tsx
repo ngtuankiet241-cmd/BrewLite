@@ -2,11 +2,65 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCart } from "../../../context/CartContext";
 import { API_URL } from "../../../config/api";
-import { getPaymentResult, type PaymentResult } from "../../../lib/payment-result";
+
+type PaymentResult = {
+  status: "loading" | "success" | "pending" | "failed" | "error";
+  message: string;
+};
+
+function getPaymentResult(data: unknown): PaymentResult {
+  const result = data as {
+    status?: string;
+    paymentStatus?: string;
+    pointsEarned?: number;
+    order?: {
+      status?: string;
+      paymentStatus?: string;
+    };
+    message?: string;
+  };
+
+  const value = String(
+    result?.paymentStatus ??
+      result?.order?.paymentStatus ??
+      result?.status ??
+      result?.order?.status ??
+      ""
+  ).toUpperCase();
+
+  if (["PAID", "SUCCESS", "COMPLETED", "SUCCEEDED"].includes(value)) {
+    return {
+      status: "success",
+      message: `Đơn hàng đã được xác nhận thanh toán thành công.${result.pointsEarned ? ` Bạn được cộng ${result.pointsEarned.toLocaleString("vi-VN")} điểm tích lũy.` : ""}`,
+    };
+  }
+
+  if (
+    ["FAILED", "CANCELLED", "CANCELED", "EXPIRED", "ERROR"].includes(value)
+  ) {
+    return {
+      status: "failed",
+      message: "Thanh toán thất bại hoặc đã bị hủy.",
+    };
+  }
+
+  if (
+    ["PENDING", "PROCESSING", "UNPAID", "WAITING", ""].includes(value)
+  ) {
+    return {
+      status: "pending",
+      message: "Đơn hàng đang chờ xác nhận thanh toán.",
+    };
+  }
+
+  return {
+    status: "pending",
+    message: `Trạng thái hiện tại: ${value}`,
+  };
+}
 
 async function fetchPaymentResult(orderCode: string, signal?: AbortSignal): Promise<PaymentResult> {
     if (!orderCode) {
@@ -81,7 +135,7 @@ function PaymentResultContent() {
       const next = await fetchPaymentResult(orderCode, controller.signal);
       if (controller.signal.aborted) return;
       setResult(next);
-      if ((next.status === "pending" || next.refundPending) && attempts++ < 30) timer = setTimeout(load, next.refundPending ? 5000 : 2000);
+      if (next.status === "pending" && attempts++ < 15) timer = setTimeout(load, 2000);
     };
     void load();
     return () => { controller.abort(); clearTimeout(timer); };
@@ -95,12 +149,6 @@ function PaymentResultContent() {
 }, [result.status, isHydrated, clearCart]);
 
   const appearance = {
-    cancelled: {
-      icon: "×",
-      title: "Đơn hàng đã hủy",
-      color: "text-stone-700",
-      background: "bg-stone-100",
-    },
     loading: {
       icon: "…",
       title: "Đang kiểm tra",
@@ -135,36 +183,20 @@ function PaymentResultContent() {
 
   return (
     <main className="min-h-screen bg-stone-100 flex items-center justify-center p-4 text-stone-800">
-      <section className="relative w-full max-w-md rounded-3xl bg-white p-7 shadow-lg text-center">
-        <Link
-          href="/orders/history"
-          aria-label="Đóng và về lịch sử mua hàng"
-          title="Về lịch sử mua hàng"
-          className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-5 w-5">
-            <path d="m6 6 12 12M18 6 6 18" />
-          </svg>
-        </Link>
-
-        {result.status !== "cancelled" && <div
-          aria-hidden="true"
+      <section className="w-full max-w-md rounded-3xl bg-white p-7 shadow-lg text-center">
+        <div
           className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full text-3xl font-bold ${appearance.color} ${appearance.background}`}
         >
-          {result.status === "failed" ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="h-8 w-8">
-              <path d="m6 6 12 12M18 6 6 18" />
-            </svg>
-          ) : appearance.icon}
-        </div>}
+          {appearance.icon}
+        </div>
 
-        <h1 className={`text-xl font-bold text-stone-900 ${result.status === "cancelled" ? "mt-7" : ""}`}>
+        <h1 className="text-xl font-bold text-stone-900">
           {appearance.title}
         </h1>
 
-        {result.message && <p className="mt-3 text-sm leading-6 text-stone-600">
+        <p className="mt-3 text-sm leading-6 text-stone-600">
           {result.message}
-        </p>}
+        </p>
 
         {orderCode && (
           <div className="mt-6 rounded-xl bg-stone-50 p-4 text-left">

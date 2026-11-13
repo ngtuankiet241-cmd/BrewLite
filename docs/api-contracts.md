@@ -60,13 +60,6 @@ stock before relying on inventory figures.
 
 ## Confirmed: order creation
 
-Customers may cancel their own unpaid orders through authenticated
-`POST /orders/:orderCode/cancel`; paid orders return 403. Staff can cancel
-unpaid/paid orders before `PREPARING` through `POST /staff/orders/:orderCode/cancel`
-with a required reason. See [staff authorization and order management](staff-orders.md).
-See [cancellation and automatic Sandbox refunds](order-cancellation.md) for the
-allowed states, repeat-request behavior, point/stock reversal and refund status.
-
 | Item | Contract |
 |---|---|
 | Method and path | `POST /orders` |
@@ -146,30 +139,6 @@ key persistence, conflict responses and tests against PostgreSQL.
 `GET /orders/me` returns the authenticated user's orders. It requires a Bearer
 JWT and returns HTTP `401` without a valid token. `GET /orders/history` remains
 available as an equivalent path for existing clients.
-## Confirmed: API v2 Sandbox payments
-
-New payments use bank-transfer QR and SePay API v2, with no Gateway form redirect.
-See [setup instructions](sepay-sandbox.md) for Dashboard fields and `.env` values.
-
-| Endpoint | Contract |
-| --- | --- |
-| `POST /payments` | Owner JWT + `Idempotency-Key`; body `{ "orderCode": "ORD-..." }`. Returns `orderCode`, `paymentStatus`, `method: "SEPAY_API_V2"`, and an internal `checkoutPath`. One reference per order. |
-| `GET /payments/checkout?orderCode=...` | Owner JWT. Returns order/payment status and `instructions` containing account, amount, transfer content, QR URL and `environment: "sandbox"`. Instructions become null after payment or cancellation. |
-| `POST /payments/webhook` | SePay bank webhook, `Authorization: Apikey <SEPAY_WEBHOOK_API_KEY>`. No customer JWT. Verifies API v2 evidence before settlement; HTTP 200 with `{ "success": true }`. |
-| `GET /payments/status?orderCode=...` | Owner JWT; payment/order status, points and refund summary. |
-| `POST /payments/ipn` | Legacy Gateway IPNs only; cannot settle a new API v2 payment. |
-
-Transfer content is `BL` followed by 24 hexadecimal characters. The account and
-whole order amount must match; partial, excess and additional transfers require
-review. The API v2 transaction UUID is stored separately from the numeric webhook
-ID. Duplicate callbacks do not award points twice. A late payment after
-cancellation queues a refund without reopening the order.
-
-The idempotency namespace is `payments.v2.create`, preventing cached Gateway forms
-from replaying as v2 checkout. Initializing v2 for an existing Gateway payment
-returns 409. Order history includes `paymentMethod` for initialized v2 payments,
-allowing QR checkout to resume. Existing Gateway obligations remain available for
-review and are not submitted by the v2 refund worker.
 
 ## Decisions still needed
 

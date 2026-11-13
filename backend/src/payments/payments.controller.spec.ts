@@ -40,7 +40,6 @@ describe('SePay IPN acknowledgement', () => {
     updateOrder.mockResolvedValue({ count: 1 });
     transaction.mockImplementation((run: (tx: unknown) => unknown) =>
       run({
-        $queryRaw: vi.fn(),
         order: { findUnique: findOrder, updateMany: updateOrder },
         payment: { update: updatePayment },
       }),

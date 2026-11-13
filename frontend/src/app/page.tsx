@@ -101,7 +101,6 @@ const formatPriceVND = (price: number): string => {
   id: string;
   email: string;
   phone: string;
-  role?: "CUSTOMER" | "STAFF" | "ADMIN";
   loyaltyPoints: number;
 };
 

@@ -20,12 +20,9 @@
 - Points are awarded when an order transitions to `PAID`, in the same database
   transaction as the payment/order update. Duplicate and concurrent notifications
   cannot award points twice or move a preparing order back to `PAID`.
-- Existing paid orders are not retroactively credited by the migration. On
-  cancellation, redeemed points are returned and awarded points are reversed once.
-  If rewards have already been spent, `User.loyaltyDebt` records the deficit;
-  future awards and returned points first clear this debt. Available points remain
-  nonnegative. Original `pointsEarned` is retained for audit, with
-  `pointsReversedAt` marking the reversal. See [cancellation and refunds](order-cancellation.md).
+- Existing paid orders are not retroactively credited by the migration. The new
+  fields default to zero. Previously awarded points are not automatically reversed
+  on cancellation: cash refund and reward reversal policies are separate work.
 
 The policy is defined in `backend/src/loyalty/loyalty.ts`. The frontend reads the
 policy from the API rather than computing the customer's authoritative balance.
@@ -47,7 +44,7 @@ the points awarded for the order.
   the final `totalAmount`. Its status can be `PENDING` or `PAID` for a free order.
 - `GET /orders/history` and `GET /payments/status`: include the order's point
   information. History also indicates whether redeemed points were refunded.
-- `User.loyaltyPoints`: available balance; `User.loyaltyDebt`: points to offset.
+- `User.loyaltyPoints`: available balance.
 - `Order.pointsRedeemed`, `pointsDiscount`, `pointsEarned`, `pointsAwardedAt`,
   `pointsRefundedAt`: per-order records and guards against duplicate processing.
 

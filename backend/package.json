@@ -7,9 +7,6 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "staff": "tsx scripts/staff.ts",
-    "test:payments": "node scripts/test-payments.mjs",
-    "refunds": "tsx scripts/refunds.ts",
     "build": "nest build",
     "seed:promotions": "tsx prisma/seed-promotions.ts",
     "deploy": "nest deploy",

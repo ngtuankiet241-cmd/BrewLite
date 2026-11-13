@@ -51,16 +51,13 @@ mới cho mỗi lần retry.
 `IdempotencyRequest` lưu hash SHA-256 của nội dung và phản hồi theo khóa chính
 `(userId, operation, key)`. Advisory lock của transaction tuần tự hóa các yêu cầu
 cùng khóa trên các instance backend. Kết quả và mọi thay đổi đơn hàng được
-commit cùng transaction. Phản hồi khởi tạo được lưu dưới dạng JSON text.
-Không tự động xóa bản ghi theo thời gian.
+commit cùng transaction. Phản hồi lưu dưới dạng JSON text để giữ thứ tự các
+trường form SePay đã ký. Không tự động xóa bản ghi theo thời gian.
 
-Với một đơn hàng, khóa hàng `Order` và khóa thanh toán nội bộ `sepay-v2:<orderId>`
+Với một đơn hàng, khóa hàng `Order` và khóa thanh toán nội bộ `sepay:<orderId>`
 giữ một giao dịch SePay ngay cả khi client gửi nhiều khóa khác nhau.
-Webhook API v2 lặp được xác nhận nhưng không ghi nhận thanh toán/cộng điểm lần nữa.
-Đơn mới dùng namespace `payments.v2.create`; kết quả form Gateway cũ không được
-phát lại cho checkout QR. Xem [thiết lập SePay API v2](sepay-sandbox.md).
-Việc khởi tạo tạo thông tin QR chuyển khoản; ứng dụng chỉ xác nhận thanh toán
-khi webhook đã được đối chiếu với khoản thu trên API v2.
+IPN lặp được xác nhận nhưng không ghi nhận thanh toán/cộng điểm lần nữa.
+Việc khởi tạo chỉ tạo form SePay đã ký; ứng dụng không tự trừ tiền ngân hàng.
 
 Tiêu chí nghiệm thu chức năng này: gửi `POST /orders` hai lần liên tiếp với
 **cùng `Idempotency-Key` và cùng body**, nhận cùng `orderCode`, và database chỉ
@@ -74,7 +71,7 @@ Từ thư mục `backend`, với PostgreSQL local đã cấu hình:
 npx.cmd prisma migrate deploy
 npx.cmd prisma generate
 npm.cmd test -- src/prisma/idempotency.spec.ts
-npm.cmd run test:payments -- test/idempotency.e2e-spec.ts
+npm.cmd run test:e2e -- test/idempotency.e2e-spec.ts
 ```
 
 Unit test gọi hai lần cùng khóa/nội dung và xác nhận thao tác tạo dữ liệu chỉ
@@ -93,7 +90,7 @@ Integration test gửi HTTP tuần tự vào PostgreSQL thực. Hai app đọc c
   của nhau; khóa sai và thiếu xác thực bị từ chối.
 
 Các fixture có ID riêng và được dọn sau test. Test dùng thông tin SePay giả
-và HTTP mock trong schema PostgreSQL riêng, không gọi SePay bên ngoài.
+để ký form cục bộ, không gọi cổng thanh toán bên ngoài.
 
 Đặt hàng đồng thời và kiểm thử không vượt tồn kho được mô tả riêng tại
 [kiểm soát tồn kho](concurrent-inventory.md).

@@ -1,11 +1,8 @@
 
 "use client";
 
-import { API_URL } from "../../../config/api";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchAccount } from "../../../lib/account";
-import CancelOrderModal from "../../../components/CancelOrderModal";
 
 type OrderOption = {
   id: string;
@@ -34,14 +31,12 @@ type Order = {
   pointsDiscount?: number;
   pointsEarned?: number;
   pointsRefunded?: boolean;
-  pointsReversed?: boolean;
-  refundStatus?: string;
-  refundAmount?: number;
-  paymentMethod?: string;
   createdAt: string;
   items: OrderItem[];
 };
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("vi-VN", {
@@ -56,38 +51,6 @@ export default function OrderHistoryPage() {
   const [error, setError] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [cancelling, setCancelling] = useState<string | null>(null);
-  const [actionError, setActionError] = useState("");
-  const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
-  const cancelInFlight = useRef(false);
-
-  async function cancelOrder(order: Order) {
-    if (cancelInFlight.current) return;
-    cancelInFlight.current = true;
-    setCancelling(order.orderCode);
-    setActionError("");
-    const token = localStorage.getItem("brewlite_access_token");
-    try {
-      const response = await fetch(`${API_URL}/orders/${encodeURIComponent(order.orderCode)}/cancel`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(typeof result.message === "string" ? result.message : "Không thể hủy đơn hàng.");
-      setOrders((previous) => previous.map((item) => item.orderCode === order.orderCode ? {
-        ...item, status: result.status, refundStatus: result.refundStatus, refundAmount: result.refundAmount,
-        pointsRefunded: (item.pointsRedeemed ?? 0) > 0, pointsReversed: (item.pointsEarned ?? 0) > 0,
-      } : item));
-      setOrderToCancel(null);
-      void fetchAccount().catch(() => undefined);
-    } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : "Không thể hủy đơn. Bạn có thể thử lại an toàn.");
-    } finally {
-      cancelInFlight.current = false;
-      setCancelling(null);
-    }
-  }
 
   useEffect(() => {
     async function loadOrders() {
@@ -130,9 +93,7 @@ export default function OrderHistoryPage() {
       }
     }
 
-    void loadOrders();
-    window.addEventListener("focus", loadOrders);
-    return () => window.removeEventListener("focus", loadOrders);
+    loadOrders();
   }, []);
 
   return (
@@ -221,8 +182,6 @@ export default function OrderHistoryPage() {
                         ? "Chờ xử lý"
                         : order.status === "PAID"
                         ? "Đã thanh toán"
-                        : order.status === "CANCELLED"
-                        ? "Đã hủy"
                         : order.status}
                     </span>
                   </div>
@@ -251,25 +210,6 @@ export default function OrderHistoryPage() {
                       ? "Thu gọn chi tiết"
                       : "Xem chi tiết hóa đơn"}
                   </button>
-
-                  {["PENDING", "PAYMENT_FAILED"].includes(order.status) && (
-                    <button type="button" disabled={cancelling !== null} onClick={() => {
-                      setActionError("");
-                      setOrderToCancel(order);
-                    }}
-                      className="mt-3 w-full rounded-xl border border-red-200 py-3 text-sm font-semibold text-red-700 disabled:opacity-50">
-                      {cancelling === order.orderCode ? "Đang hủy đơn…" : "Hủy đơn hàng"}
-                    </button>
-                  )}
-                  {order.status === "PAID" && (
-                    <p className="mt-3 text-center text-sm leading-6 text-stone-500">Đơn đã thanh toán. Vui lòng liên hệ nhân viên nếu cần hủy trước khi pha chế.</p>
-                  )}
-                  {order.status === "CANCELLED" && <div className="mt-3 text-center text-sm">
-                    <Link className="inline-block text-emerald-800 underline" href={`/payment/result?orderCode=${encodeURIComponent(order.orderCode)}`}>Kiểm tra trạng thái hoàn tiền</Link>
-                  </div>}
-                  {order.paymentMethod === "SEPAY_API_V2" && ["PENDING", "PAYMENT_FAILED"].includes(order.status) && (
-                    <Link href={`/payment/checkout?orderCode=${encodeURIComponent(order.orderCode)}`} className="mt-3 block w-full rounded-xl bg-emerald-800 py-3 text-center text-sm font-semibold text-white hover:bg-emerald-900">Tiếp tục thanh toán QR</Link>
-                  )}
 
                   {expanded && (
                     <div className="mt-4 border-t border-stone-200 pt-4 space-y-4">
@@ -318,7 +258,7 @@ export default function OrderHistoryPage() {
                       </div>
                       {(order.discountAmount ?? 0) > 0 && <p className="text-sm text-emerald-800">Mã {order.promotionCode}: giảm {formatMoney(order.discountAmount ?? 0)}</p>}
                       {(order.pointsRedeemed ?? 0) > 0 && <p className="text-sm text-emerald-800">Đã dùng {order.pointsRedeemed} điểm: giảm {formatMoney(order.pointsDiscount ?? 0)}{order.pointsRefunded ? " (đã hoàn điểm)" : ""}.</p>}
-                      {(order.pointsEarned ?? 0) > 0 && <p className="text-sm text-emerald-800">{order.pointsReversed ? "Đã thu hồi" : "Đã nhận"} {order.pointsEarned} điểm tích lũy.</p>}
+                      {(order.pointsEarned ?? 0) > 0 && <p className="text-sm text-emerald-800">Đã nhận {order.pointsEarned} điểm tích lũy.</p>}
                     </div>
                   )}
                 </div>
@@ -326,18 +266,6 @@ export default function OrderHistoryPage() {
             })}
         </div>
       </div>
-      {orderToCancel && (
-        <CancelOrderModal
-          orderCode={orderToCancel.orderCode}
-          hasPayment={orderToCancel.status === "PAID" && orderToCancel.totalAmount > 0}
-          isCancelling={cancelling !== null}
-          error={actionError}
-          onClose={() => {
-            if (!cancelInFlight.current) setOrderToCancel(null);
-          }}
-          onConfirm={() => void cancelOrder(orderToCancel)}
-        />
-      )}
     </main>
   );
 }

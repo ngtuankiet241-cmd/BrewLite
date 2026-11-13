@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 interface CancelOrderDialogProps {
   orderCode: string;
   onClose: () => void;
-  onConfirm: (reason: string) => void;
+  onConfirm: () => void;
 }
 
 export default function CancelOrderDialog({ orderCode, onClose, onConfirm }: CancelOrderDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [reason, setReason] = useState("");
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -32,14 +31,10 @@ export default function CancelOrderDialog({ orderCode, onClose, onConfirm }: Can
         <p>Mã đơn: <strong className="break-all text-stone-900">{orderCode}</strong></p>
         <p>Đơn sẽ chuyển sang trạng thái đã hủy. Thao tác này không xác nhận rằng tiền thanh toán đã được hoàn cho khách.</p>
       </div>
-      <form onSubmit={(event) => { event.preventDefault(); if (reason.trim()) onConfirm(reason.trim()); }}>
-        <label htmlFor="staff-cancel-reason" className="mt-5 block text-sm font-semibold">Lý do hủy đơn <span className="text-rose-700">*</span></label>
-        <textarea id="staff-cancel-reason" required maxLength={500} rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ví dụ: khách yêu cầu hủy trước khi pha chế" className="mt-2 w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-emerald-700 focus:outline-none" />
-        <div className="mt-6 flex flex-wrap justify-end gap-3">
-          <button type="button" autoFocus onClick={onClose} className="rounded-xl border border-stone-300 px-4 py-3 text-sm font-semibold hover:bg-stone-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800">Giữ đơn</button>
-          <button type="submit" disabled={!reason.trim()} className="rounded-xl bg-rose-700 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700 disabled:opacity-50">Xác nhận hủy đơn</button>
-        </div>
-      </form>
+      <div className="mt-6 flex flex-wrap justify-end gap-3">
+        <button type="button" autoFocus onClick={onClose} className="rounded-xl border border-stone-300 px-4 py-3 text-sm font-semibold hover:bg-stone-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800">Giữ đơn</button>
+        <button type="button" onClick={onConfirm} className="rounded-xl bg-rose-700 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700">Xác nhận hủy đơn</button>
+      </div>
     </dialog>
   );
 }

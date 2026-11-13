@@ -57,22 +57,4 @@ export class PaymentsController {
   ) {
     return this.paymentsService.handleIpn(secretKey, body);
   }
-
-  @Get('checkout')
-  @UseGuards(JwtAuthGuard)
-  checkout(
-    @Req() request: AuthenticatedRequest,
-    @Query('orderCode') orderCode: string,
-  ) {
-    return this.paymentsService.getCheckout(orderCode, request.user.sub);
-  }
-
-  @Post('webhook')
-  @HttpCode(HttpStatus.OK)
-  webhook(
-    @Headers('authorization') authorization: string | undefined,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.paymentsService.handleWebhook(authorization, body);
-  }
 }

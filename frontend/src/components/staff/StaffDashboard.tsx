@@ -2,11 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { asStaffApiError, cancelStaffOrder, fetchStaffOrders, retryStaffRefund, StaffApiError, updateStaffOrderStatus, type StaffOrder } from "../../lib/staff-api";
+import { asStaffApiError, fetchStaffOrders, StaffApiError, updateStaffOrderStatus, type StaffOrder } from "../../lib/staff-api";
 import { getStaffOrderActions, STAFF_STATUS_LABELS, type StaffActionStatus, type StaffOrderStatus } from "../../lib/staff-order-status";
-import type { StaffRefund } from "../../lib/staff-orders";
 import CancelOrderDialog from "./CancelOrderDialog";
-import RefundRetryDialog from "./RefundRetryDialog";
 import StaffOrderCard from "./StaffOrderCard";
 
 type Filter = "ALL" | StaffOrderStatus;
@@ -32,8 +30,6 @@ export default function StaffDashboard() {
   const [filter, setFilter] = useState<Filter>("ALL");
   const [pendingCode, setPendingCode] = useState<string | null>(null);
   const [cancelOrder, setCancelOrder] = useState<StaffOrder | null>(null);
-  const [refundToRetry, setRefundToRetry] = useState<{ order: StaffOrder; refund: StaffRefund } | null>(null);
-  const [search, setSearch] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   // A synchronous lock also blocks a second click before React renders disabled buttons.
   const requestLock = useRef(false);
@@ -84,19 +80,19 @@ export default function StaffDashboard() {
     finally { if (!signal.aborted) requestLock.current = false; }
   }
 
-  async function mutateOrder(order: StaffOrder, operation: (signal: AbortSignal) => Promise<string>) {
+  async function updateOrder(order: StaffOrder, status: StaffActionStatus) {
     const signal = lifetime.current?.signal;
     if (requestLock.current || !signal || signal.aborted) return;
+    if (!getStaffOrderActions(order.status).some((action) => action.status === status)) return;
     requestLock.current = true;
     setPendingCode(order.orderCode);
     setActionError(null);
     setNotice("");
     setCancelOrder(null);
-    setRefundToRetry(null);
     try {
-      const message = await operation(signal);
+      const confirmed = await updateStaffOrderStatus(order.orderCode, { status }, signal);
       if (signal.aborted) return;
-      setNotice(message);
+      setNotice(`Đã cập nhật đơn ${confirmed.orderCode}: ${STAFF_STATUS_LABELS[confirmed.status]}.${status === "CANCELLED" ? " Việc hủy đơn không xác nhận đã hoàn tiền cho khách." : ""}`);
       // Never change an order locally ahead of the server. GET remains the list's source of truth.
       setIsLoading(true);
       setListError(null);
@@ -111,7 +107,7 @@ export default function StaffDashboard() {
         setListError(apiError);
       } else {
         setActionError(apiError);
-        // A lost response may hide a committed write; reconcile without repeating it.
+        // A lost response may hide a committed write; reconcile without retrying PATCH.
         setIsLoading(true);
         setListError(null);
         await reloadOrders(signal);
@@ -124,24 +120,6 @@ export default function StaffDashboard() {
     }
   }
 
-  async function updateOrder(order: StaffOrder, status: StaffActionStatus, reason = "") {
-    if (!getStaffOrderActions(order.status).some((action) => action.status === status)) return;
-    await mutateOrder(order, async (signal) => {
-      const confirmed = status === "CANCELLED"
-        ? await cancelStaffOrder(order.orderCode, reason, signal)
-        : await updateStaffOrderStatus(order.orderCode, { status }, signal);
-      return `Đã cập nhật đơn ${confirmed.orderCode}: ${STAFF_STATUS_LABELS[confirmed.status]}.${status === "CANCELLED" ? " Theo dõi trạng thái hoàn tiền trong chi tiết đơn." : ""}`;
-    });
-  }
-
-  async function retryRefund(order: StaffOrder, refund: StaffRefund) {
-    if (!refund.canRetry || order.status !== "CANCELLED") return;
-    await mutateOrder(order, async (signal) => {
-      await retryStaffRefund(order.orderCode, refund.id, signal);
-      return `Đã xếp lịch gửi lại yêu cầu hoàn tiền cho đơn ${order.orderCode}. Vui lòng theo dõi kết quả.`;
-    });
-  }
-
   function handleAction(order: StaffOrder, status: StaffActionStatus) {
     if (requestLock.current) return;
     if (status === "CANCELLED") setCancelOrder(order);
@@ -149,10 +127,7 @@ export default function StaffDashboard() {
   }
 
   const busy = isLoading || pendingCode !== null;
-  const hasDialog = cancelOrder !== null || refundToRetry !== null;
-  const query = search.trim().toLocaleLowerCase("vi-VN");
-  const visibleOrders = orders.filter((order) => (filter === "ALL" || order.status === filter) &&
-    [order.orderCode, order.customer?.email, order.customer?.phone].some((value) => value?.toLocaleLowerCase("vi-VN").includes(query)));
+  const visibleOrders = orders.filter((order) => filter === "ALL" || order.status === filter);
 
   return (
     <main className="min-h-screen bg-[#F6F5F1] text-stone-800">
@@ -168,7 +143,7 @@ export default function StaffDashboard() {
               <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Đơn hàng</h1>
               <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-100">Tiếp nhận đơn đã thanh toán, theo dõi pha chế và xác nhận giao khách.</p>
             </div>
-            <button type="button" onClick={() => void refresh()} disabled={busy || hasDialog} className="min-h-11 rounded-xl border border-emerald-700 bg-emerald-900 px-5 py-3 text-sm font-semibold hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-50">{isLoading ? "Đang tải..." : "Tải lại danh sách"}</button>
+            <button type="button" onClick={() => void refresh()} disabled={busy || cancelOrder !== null} className="min-h-11 rounded-xl border border-emerald-700 bg-emerald-900 px-5 py-3 text-sm font-semibold hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-50">{isLoading ? "Đang tải..." : "Tải lại danh sách"}</button>
           </div>
         </div>
       </header>
@@ -196,7 +171,6 @@ export default function StaffDashboard() {
 
         {hasLoaded && !listError && (
           <div className="space-y-3">
-            <input type="search" aria-label="Tìm đơn theo mã, email hoặc số điện thoại" placeholder="Tìm mã đơn, email hoặc số điện thoại…" maxLength={100} value={search} onChange={(event) => setSearch(event.target.value)} className="w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm focus:border-emerald-700 focus:outline-none" />
             <div role="group" aria-label="Lọc theo trạng thái" className="flex flex-wrap gap-2">
               {FILTERS.map((value) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)} className={`min-h-10 rounded-full border px-4 py-2 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800 ${filter === value ? "border-emerald-900 bg-emerald-900 text-white" : "border-stone-200 bg-white text-stone-600 hover:border-emerald-700"}`}>{value === "ALL" ? "Tất cả" : STAFF_STATUS_LABELS[value]}</button>)}
             </div>
@@ -207,7 +181,7 @@ export default function StaffDashboard() {
         <div aria-busy={busy}>
           {isLoading && <div role="status" className="mb-5 flex items-center gap-3 rounded-2xl border border-stone-200 bg-white p-5 text-sm text-stone-600"><span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-emerald-800 motion-reduce:animate-none" />{pendingCode ? "Đang tải lại đơn hàng từ máy chủ..." : "Đang tải danh sách đơn hàng..."}</div>}
 
-          {hasLoaded && !listError && visibleOrders.length > 0 && <section aria-label="Danh sách đơn hàng" className="grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-3">{visibleOrders.map((order) => <StaffOrderCard key={order.orderCode} order={order} disabled={busy || hasDialog} processing={pendingCode === order.orderCode} onAction={handleAction} onRetryRefund={(refund) => setRefundToRetry({ order, refund })} />)}</section>}
+          {hasLoaded && !listError && visibleOrders.length > 0 && <section aria-label="Danh sách đơn hàng" className="grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-3">{visibleOrders.map((order) => <StaffOrderCard key={order.orderCode} order={order} disabled={busy || cancelOrder !== null} processing={pendingCode === order.orderCode} onAction={handleAction} />)}</section>}
 
           {hasLoaded && !isLoading && !listError && visibleOrders.length === 0 && <section className="rounded-2xl border border-dashed border-stone-300 bg-white px-6 py-16 text-center"><p className="text-3xl" aria-hidden="true">☕</p><h2 className="mt-4 text-lg font-bold text-stone-800">{orders.length === 0 ? "Chưa có đơn hàng" : "Không có đơn ở trạng thái này"}</h2><p className="mt-2 text-sm text-stone-500">{orders.length === 0 ? "Đơn hàng sẽ xuất hiện tại đây khi được ghi nhận trên hệ thống." : "Chọn trạng thái khác hoặc tải lại danh sách để kiểm tra."}</p></section>}
         </div>
@@ -215,8 +189,7 @@ export default function StaffDashboard() {
         <p className="border-t border-stone-200 pt-5 text-xs leading-6 text-stone-500">Chỉ tài khoản được backend cấp quyền nhân viên mới có thể xem và xử lý đơn. Hủy đơn không đồng nghĩa tiền đã được hoàn.</p>
       </div>
 
-      {cancelOrder && <CancelOrderDialog orderCode={cancelOrder.orderCode} onClose={() => setCancelOrder(null)} onConfirm={(reason) => void updateOrder(cancelOrder, "CANCELLED", reason)} />}
-      {refundToRetry && <RefundRetryDialog orderCode={refundToRetry.order.orderCode} amount={refundToRetry.refund.amount} onClose={() => setRefundToRetry(null)} onConfirm={() => void retryRefund(refundToRetry.order, refundToRetry.refund)} />}
+      {cancelOrder && <CancelOrderDialog orderCode={cancelOrder.orderCode} onClose={() => setCancelOrder(null)} onConfirm={() => void updateOrder(cancelOrder, "CANCELLED")} />}
     </main>
   );
 }

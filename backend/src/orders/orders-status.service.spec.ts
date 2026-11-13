@@ -29,12 +29,7 @@ describe('Persistent order status transitions', () => {
         order: { findFirst: findOrder, updateMany: updateOrder },
         $transaction: (run: (tx: unknown) => unknown) =>
           run({
-            $queryRaw: vi.fn(),
             order: { findFirst: findOrder, updateMany: updateOrder },
-            payment: {
-              updateMany: vi.fn(),
-              findMany: vi.fn().mockResolvedValue([]),
-            },
           }),
       } as unknown as PrismaService,
       {} as PromotionsService,
@@ -91,29 +86,14 @@ describe('Persistent order status transitions', () => {
     ['PAID', 'CANCELLED'],
     ['PAYMENT_FAILED', 'CANCELLED'],
   ])('persists the diagram branch %s -> %s', async (from, to) => {
-    findOrder.mockResolvedValue({
-      id: orderCode,
-      orderCode,
-      status: from,
-      items: [],
-      payments: [],
-    });
-    await expect(service.updateStatus(orderCode, to)).resolves.toMatchObject({
+    findOrder.mockResolvedValue({ id: orderCode, orderCode, status: from });
+    await expect(service.updateStatus(orderCode, to)).resolves.toEqual({
       orderCode,
       status: to,
     });
     expect(updateOrder).toHaveBeenCalledExactlyOnceWith({
       where: { id: orderCode, status: from },
-      data:
-        to === 'CANCELLED'
-          ? {
-              status: to,
-              cancelledAt: expect.any(Date),
-              cancellationReason: null,
-              cancelledById: null,
-              cancellationActor: 'SYSTEM',
-            }
-          : { status: to },
+      data: { status: to },
     });
   });
 

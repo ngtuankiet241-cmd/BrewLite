@@ -1,9 +1,3 @@
-import { vi } from 'vitest';
-import {
-  bankNotification,
-  mockV2Api,
-  v2TestConfig,
-} from './sepay-v2.fixture.js';
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -51,7 +45,7 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
         {
           provide: ConfigService,
           useValue: new ConfigService({
-            ...v2TestConfig,
+            SEPAY_ENV: 'sandbox',
             SEPAY_MERCHANT_ID: 'local-test-merchant',
             SEPAY_SECRET_KEY: 'local-test-secret',
             SEPAY_IPN_SECRET_KEY: ipnSecret,
@@ -73,7 +67,6 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
   });
 
   beforeEach(async () => {
-    mockV2Api(db);
     fixture = `idempotency-test-${randomUUID()}`;
     await db.user.createMany({
       data: [fixture, `${fixture}-other`].map((id) => ({
@@ -96,7 +89,6 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
   });
 
   afterEach(async () => {
-    vi.unstubAllGlobals();
     const userIds = [fixture, `${fixture}-other`];
     await db.$transaction(async (tx) => {
       await tx.payment.deleteMany({
@@ -153,19 +145,23 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
   const balance = async () =>
     (await db.user.findUniqueOrThrow({ where: { id: fixture } })).loyaltyPoints;
   const orderCount = () => db.order.count({ where: { userId: fixture } });
-  const notify = async (
+  const notify = (
     app: INestApplication<App>,
     orderCode: string,
     amount: number,
-    status = 200,
-  ) => {
-    const payload = await bankNotification(db, orderCode, amount);
-    return request(app.getHttpServer())
-      .post('/payments/webhook')
-      .set('Authorization', 'Apikey test-webhook-key')
-      .send(payload)
-      .expect(status);
-  };
+  ) =>
+    request(app.getHttpServer())
+      .post('/payments/ipn')
+      .set('X-Secret-Key', ipnSecret)
+      .send({
+        notification_type: 'ORDER_PAID',
+        order: {
+          order_invoice_number: orderCode,
+          order_status: 'CAPTURED',
+          order_currency: 'VND',
+          order_amount: String(amount),
+        },
+      });
 
   it('creates exactly one order when the same Idempotency-Key and body are sent twice', async () => {
     const promotionCode = fixture.toUpperCase();
@@ -288,8 +284,10 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
     const retry = await pay(second, key, code).expect(201);
 
     expect(retry.body).toEqual(initial.body);
-    expect(retry.body.method).toBe('SEPAY_API_V2');
-    expect(retry.body.checkoutPath).toBe(initial.body.checkoutPath);
+    // The order of signed form fields survives storage and replay.
+    expect(Object.keys(retry.body.formFields)).toEqual(
+      Object.keys(initial.body.formFields),
+    );
     expect(await db.payment.count({ where: { orderId: code } })).toBe(1);
     expect(await orderCount()).toBe(1);
     expect(await stock()).toBe(19);
@@ -303,7 +301,7 @@ describe('Idempotent checkout retries in PostgreSQL', () => {
     const code = created.body.orderCode as string;
     const key = randomUUID();
     const initial = await pay(first, key, code).expect(201);
-    await notify(first, code, 24800);
+    await notify(first, code, 24800).expect(200);
     expect(await balance()).toBe(104);
     await first.get(OrdersService).updateStatus(code, 'PREPARING');
     const replay = await pay(second, key, code).expect(201);
