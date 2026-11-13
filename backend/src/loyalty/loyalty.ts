@@ -3,6 +3,26 @@ import type { Prisma } from '@prisma/client';
 
 export const LOYALTY_POLICY = { spendPerPoint: 1000, pointValue: 10 } as const;
 
+async function creditPoints(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  points: number,
+) {
+  await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+  const user = await tx.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: { loyaltyDebt: true },
+  });
+  const repaid = Math.min(user.loyaltyDebt, points);
+  await tx.user.update({
+    where: { id: userId },
+    data: {
+      loyaltyPoints: { increment: points - repaid },
+      loyaltyDebt: { decrement: repaid },
+    },
+  });
+}
+
 export function redemptionDiscount(
   points: number,
   orderAmount: number,
@@ -50,10 +70,7 @@ export async function awardPoints(
     data: { pointsEarned: points, pointsAwardedAt: new Date() },
   });
   if (result.count === 1 && points > 0) {
-    await tx.user.update({
-      where: { id: order.userId },
-      data: { loyaltyPoints: { increment: points } },
-    });
+    await creditPoints(tx, order.userId, points);
   }
 }
 
@@ -67,9 +84,33 @@ export async function refundPoints(
     data: { pointsRefundedAt: new Date() },
   });
   if (result.count === 1) {
+    await creditPoints(tx, order.userId, order.pointsRedeemed);
+  }
+}
+
+export async function reverseEarnedPoints(
+  tx: Prisma.TransactionClient,
+  order: { id: string; userId: string | null; pointsEarned: number },
+): Promise<void> {
+  if (!order.userId || !order.pointsEarned) return;
+  const result = await tx.order.updateMany({
+    where: { id: order.id, status: 'CANCELLED', pointsReversedAt: null },
+    data: { pointsReversedAt: new Date() },
+  });
+  if (result.count === 1) {
+    // Keep the spendable balance nonnegative; future credits repay spent rewards.
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${order.userId} FOR UPDATE`;
+    const user = await tx.user.findUniqueOrThrow({
+      where: { id: order.userId },
+      select: { loyaltyPoints: true },
+    });
+    const recovered = Math.min(user.loyaltyPoints, order.pointsEarned);
     await tx.user.update({
       where: { id: order.userId },
-      data: { loyaltyPoints: { increment: order.pointsRedeemed } },
+      data: {
+        loyaltyPoints: { decrement: recovered },
+        loyaltyDebt: { increment: order.pointsEarned - recovered },
+      },
     });
   }
 }

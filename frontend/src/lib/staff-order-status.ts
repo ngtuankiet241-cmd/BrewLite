@@ -25,7 +25,7 @@ export const STAFF_STATUS_LABELS: Record<StaffOrderStatus, string> = {
 };
 
 const STAFF_ACTIONS: Record<StaffOrderStatus, readonly StaffOrderAction[]> = {
-  PENDING: [],
+  PENDING: [{ status: "CANCELLED", label: "Hủy đơn" }],
   PAID: [
     { status: "PREPARING", label: "Nhận đơn" },
     { status: "CANCELLED", label: "Hủy đơn" },
@@ -33,7 +33,7 @@ const STAFF_ACTIONS: Record<StaffOrderStatus, readonly StaffOrderAction[]> = {
   PREPARING: [{ status: "READY", label: "Pha chế xong" }],
   READY: [{ status: "COMPLETED", label: "Đã giao khách" }],
   COMPLETED: [],
-  PAYMENT_FAILED: [],
+  PAYMENT_FAILED: [{ status: "CANCELLED", label: "Hủy đơn" }],
   CANCELLED: [],
 };
 

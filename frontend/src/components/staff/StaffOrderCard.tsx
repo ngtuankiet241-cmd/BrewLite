@@ -1,6 +1,7 @@
 import type { StaffOrder } from "../../lib/staff-api";
 import { getStaffOrderActions, type StaffActionStatus } from "../../lib/staff-order-status";
 import OrderStatusBadge from "./OrderStatusBadge";
+import { refundMessage } from "../../lib/refunds";
 
 const money = new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" });
 const dateTime = new Intl.DateTimeFormat("vi-VN", {
@@ -45,6 +46,15 @@ export default function StaffOrderCard({ order, disabled, processing, onAction }
           <span className="text-sm text-stone-600">Tổng tiền</span>
           <strong className="text-lg text-emerald-950">{money.format(order.total)}</strong>
         </div>
+        {order.cancellation && <div className="mt-4 space-y-2 rounded-xl bg-stone-50 p-3 text-xs leading-5 text-stone-700">
+          <p><strong>Lý do hủy:</strong> {order.cancellation.reason}</p>
+          <p>Hủy lúc {dateTime.format(new Date(order.cancellation.cancelledAt))} · Giờ Việt Nam</p>
+          <p>{order.refund ? refundMessage(order.refund) : "Chưa ghi nhận khoản thanh toán cần hoàn. Nếu thanh toán đến sau, hệ thống sẽ tự giả lập hoàn tiền."}</p>
+          {order.refund && <p className="break-all">Mã hoàn: {order.refund.reference}</p>}
+          <p className={order.cancellation.inventoryStatus === "NEEDS_REVIEW" ? "font-semibold text-amber-800" : ""}>{order.cancellation.inventoryStatus === "RESTORED" ? "Đã hoàn nguyên liệu về kho." : "Cần kiểm tra kho thủ công: chưa đủ dữ liệu xác nhận hoàn nguyên liệu."}</p>
+          {order.cancellation.promotionReleased && <p>Đã hoàn lượt mã giảm giá.</p>}
+          <p>Đã trả {order.cancellation.pointsReturned} điểm đã dùng; thu hồi {order.cancellation.pointsReversed} điểm tích lũy.</p>
+        </div>}
         {actions.length > 0 ? (
           <div className="mt-4 flex flex-wrap gap-2">
             {actions.map((action) => (

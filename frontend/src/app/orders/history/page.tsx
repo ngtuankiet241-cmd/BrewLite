@@ -3,6 +3,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { API_URL } from "../../../config/api";
+import { refundMessage, type RefundSummary } from "../../../lib/refunds";
+import { isStaffOrderStatus, STAFF_STATUS_LABELS } from "../../../lib/staff-order-status";
 
 type OrderOption = {
   id: string;
@@ -31,12 +34,12 @@ type Order = {
   pointsDiscount?: number;
   pointsEarned?: number;
   pointsRefunded?: boolean;
+  pointsReversed?: boolean;
+  refund: RefundSummary | null;
+  cancellation: { reason: string | null; cancelledAt: string; inventoryStatus: string; promotionReleased: boolean } | null;
   createdAt: string;
   items: OrderItem[];
 };
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("vi-VN", {
@@ -178,17 +181,20 @@ export default function OrderHistoryPage() {
                     </div>
 
                     <span className="text-xs font-semibold px-3 py-1.5 bg-amber-100 text-amber-800 rounded-full shrink-0">
-                      {order.status === "PENDING"
-                        ? "Chờ xử lý"
-                        : order.status === "PAID"
-                        ? "Đã thanh toán"
-                        : order.status}
+                      {isStaffOrderStatus(order.status) ? STAFF_STATUS_LABELS[order.status] : order.status}
                     </span>
                   </div>
 
                   <p className="text-xs text-stone-500 mt-3">
                     {new Date(order.createdAt).toLocaleString("vi-VN")}
                   </p>
+                  {order.cancellation && <div className="mt-3 rounded-xl bg-stone-50 p-3 text-sm leading-6">
+                    <p>Lý do hủy: {order.cancellation.reason}</p>
+                    <p>{order.refund ? refundMessage(order.refund) : "Chưa ghi nhận khoản thanh toán cần hoàn. Khoản thanh toán đến sau sẽ được tự động giả lập hoàn tiền."}</p>
+                    {order.refund && <p className="break-all text-xs text-stone-500">Mã hoàn: {order.refund.reference}</p>}
+                    {order.pointsRefunded && <p>Đã trả {order.pointsRedeemed} điểm đã dùng.</p>}
+                    {order.pointsReversed && <p>Đã thu hồi {order.pointsEarned} điểm tích lũy từ đơn này.</p>}
+                  </div>}
 
                   <div className="border-t border-stone-100 mt-4 pt-4 flex justify-between items-center">
                     <span className="font-semibold">Tổng tiền</span>
@@ -258,7 +264,7 @@ export default function OrderHistoryPage() {
                       </div>
                       {(order.discountAmount ?? 0) > 0 && <p className="text-sm text-emerald-800">Mã {order.promotionCode}: giảm {formatMoney(order.discountAmount ?? 0)}</p>}
                       {(order.pointsRedeemed ?? 0) > 0 && <p className="text-sm text-emerald-800">Đã dùng {order.pointsRedeemed} điểm: giảm {formatMoney(order.pointsDiscount ?? 0)}{order.pointsRefunded ? " (đã hoàn điểm)" : ""}.</p>}
-                      {(order.pointsEarned ?? 0) > 0 && <p className="text-sm text-emerald-800">Đã nhận {order.pointsEarned} điểm tích lũy.</p>}
+                      {(order.pointsEarned ?? 0) > 0 && <p className="text-sm text-emerald-800">{order.pointsReversed ? "Đã thu hồi" : "Đã nhận"} {order.pointsEarned} điểm tích lũy.</p>}
                     </div>
                   )}
                 </div>

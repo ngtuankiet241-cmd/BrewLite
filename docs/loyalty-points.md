@@ -20,9 +20,11 @@
 - Points are awarded when an order transitions to `PAID`, in the same database
   transaction as the payment/order update. Duplicate and concurrent notifications
   cannot award points twice or move a preparing order back to `PAID`.
-- Existing paid orders are not retroactively credited by the migration. The new
-  fields default to zero. Previously awarded points are not automatically reversed
-  on cancellation: cash refund and reward reversal policies are separate work.
+- Existing paid orders are not retroactively credited by the migration. Their
+  point fields retain the stored values. Staff cancellation returns redeemed
+  points and reverses earned points once. Spent rewards become `loyaltyDebt`,
+  repaid by future earnings/returned points before increasing the spendable
+  balance. See [cancellation and simulated refunds](order-cancellation.md).
 
 The policy is defined in `backend/src/loyalty/loyalty.ts`. The frontend reads the
 policy from the API rather than computing the customer's authoritative balance.
@@ -37,16 +39,17 @@ the points awarded for the order.
 
 ## API and storage
 
-- `GET /auth/me`: authenticated profile with `loyaltyPoints` and
+- `GET /auth/me`: authenticated profile with `loyaltyPoints`, `loyaltyDebt`, `role` and
   `loyaltyPolicy: { spendPerPoint: 1000, pointValue: 10 }`.
 - `POST /orders`: accepts optional integer `pointsToRedeem` (zero or greater).
   The response includes `pointsRedeemed`, `pointsDiscount`, `pointsEarned`, and
   the final `totalAmount`. Its status can be `PENDING` or `PAID` for a free order.
 - `GET /orders/history` and `GET /payments/status`: include the order's point
   information. History also indicates whether redeemed points were refunded.
-- `User.loyaltyPoints`: available balance.
+- `User.loyaltyPoints`: nonnegative available balance. `User.loyaltyDebt`:
+  nonnegative points still to recover from cancelled orders.
 - `Order.pointsRedeemed`, `pointsDiscount`, `pointsEarned`, `pointsAwardedAt`,
-  `pointsRefundedAt`: per-order records and guards against duplicate processing.
+  `pointsRefundedAt`, `pointsReversedAt`: per-order records and guards against duplicate processing.
 
 Apply the additive migration and generate the client from `backend/`:
 

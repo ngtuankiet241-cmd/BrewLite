@@ -276,15 +276,14 @@ describe('Loyalty points persisted in PostgreSQL', () => {
     });
   });
 
-  it('returns reserved points once when an unpaid order is cancelled and rejects a late payment callback', async () => {
+  it('returns reserved points once and simulates a refund for a late payment callback', async () => {
     const order = await checkout();
     await app.get(OrdersService).updateStatus(order.orderCode, 'CANCELLED');
     expect(await balance()).toBe(100);
-    await expect(
-      app.get(OrdersService).updateStatus(order.orderCode, 'CANCELLED'),
-    ).rejects.toThrow();
+    await app.get(OrdersService).updateStatus(order.orderCode, 'CANCELLED');
     expect(await balance()).toBe(100);
-    await notify(order.orderCode, 24800).expect(400);
+    await notify(order.orderCode, 24800).expect(200);
+    expect(await db.refund.count({ where: { order: { orderCode: order.orderCode }, mode: 'SIMULATED' } })).toBe(1);
     expect(await balance()).toBe(100);
   });
 

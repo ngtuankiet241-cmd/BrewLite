@@ -80,7 +80,7 @@ export default function StaffDashboard() {
     finally { if (!signal.aborted) requestLock.current = false; }
   }
 
-  async function updateOrder(order: StaffOrder, status: StaffActionStatus) {
+  async function updateOrder(order: StaffOrder, status: StaffActionStatus, reason?: string) {
     const signal = lifetime.current?.signal;
     if (requestLock.current || !signal || signal.aborted) return;
     if (!getStaffOrderActions(order.status).some((action) => action.status === status)) return;
@@ -90,9 +90,9 @@ export default function StaffDashboard() {
     setNotice("");
     setCancelOrder(null);
     try {
-      const confirmed = await updateStaffOrderStatus(order.orderCode, { status }, signal);
+      const confirmed = await updateStaffOrderStatus(order.orderCode, { status, expectedStatus: order.status, ...(reason ? { reason } : {}) }, signal);
       if (signal.aborted) return;
-      setNotice(`Đã cập nhật đơn ${confirmed.orderCode}: ${STAFF_STATUS_LABELS[confirmed.status]}.${status === "CANCELLED" ? " Việc hủy đơn không xác nhận đã hoàn tiền cho khách." : ""}`);
+      setNotice(`Đã cập nhật đơn ${confirmed.orderCode}: ${STAFF_STATUS_LABELS[confirmed.status]}.${status === "CANCELLED" ? " Xem kết quả hoàn tiền giả lập và xử lý sau hủy trên thẻ đơn." : ""}`);
       // Never change an order locally ahead of the server. GET remains the list's source of truth.
       setIsLoading(true);
       setListError(null);
@@ -186,10 +186,10 @@ export default function StaffDashboard() {
           {hasLoaded && !isLoading && !listError && visibleOrders.length === 0 && <section className="rounded-2xl border border-dashed border-stone-300 bg-white px-6 py-16 text-center"><p className="text-3xl" aria-hidden="true">☕</p><h2 className="mt-4 text-lg font-bold text-stone-800">{orders.length === 0 ? "Chưa có đơn hàng" : "Không có đơn ở trạng thái này"}</h2><p className="mt-2 text-sm text-stone-500">{orders.length === 0 ? "Đơn hàng sẽ xuất hiện tại đây khi được ghi nhận trên hệ thống." : "Chọn trạng thái khác hoặc tải lại danh sách để kiểm tra."}</p></section>}
         </div>
 
-        <p className="border-t border-stone-200 pt-5 text-xs leading-6 text-stone-500">Chỉ tài khoản được backend cấp quyền nhân viên mới có thể xem và xử lý đơn. Hủy đơn không đồng nghĩa tiền đã được hoàn.</p>
+        <p className="border-t border-stone-200 pt-5 text-xs leading-6 text-stone-500">Thanh toán dùng SePay Payment Gateway Sandbox. Hoàn tiền được giả lập trong BrewLite, không chuyển tiền thật. Chỉ hủy đơn trước khi bắt đầu pha chế.</p>
       </div>
 
-      {cancelOrder && <CancelOrderDialog orderCode={cancelOrder.orderCode} onClose={() => setCancelOrder(null)} onConfirm={() => void updateOrder(cancelOrder, "CANCELLED")} />}
+      {cancelOrder && <CancelOrderDialog orderCode={cancelOrder.orderCode} onClose={() => setCancelOrder(null)} onConfirm={(reason) => void updateOrder(cancelOrder, "CANCELLED", reason)} />}
     </main>
   );
 }
