@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,14 +16,14 @@ import {
   awardPoints,
   redeemPoints,
   redemptionDiscount,
-  refundPoints,
+  reverseCancellationPoints,
 } from '../loyalty/loyalty.js';
 import {
-  Order,
-  OrderItem,
-  OrderSizeId,
-  OrderStatus,
-} from './order.types.js';
+  requestRefund,
+  refundSummary,
+  SETTLED_PAYMENT_STATUSES,
+} from '../payments/refunds.js';
+import { Order, OrderItem, OrderSizeId, OrderStatus } from './order.types.js';
 
 const LEGACY_SIZES = {
   [OrderSizeId.Small]: { name: 'Nhỏ', extraPrice: 0 },
@@ -46,6 +47,7 @@ export class OrdersService {
     orderCode: string,
     nextStatus: OrderStatus,
   ): Promise<Pick<Order, 'orderCode' | 'status'>> {
+    if (nextStatus === 'CANCELLED') return this.cancelOrder(orderCode);
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findFirst({
         where: { OR: [{ id: orderCode }, { orderCode }] },
@@ -73,8 +75,157 @@ export class OrdersService {
         );
       }
       if (nextStatus === 'PAID') await awardPoints(tx, order);
-      if (nextStatus === 'CANCELLED') await refundPoints(tx, order);
       return { orderCode: order.orderCode, status: nextStatus };
+    });
+  }
+
+  async cancel(orderCode: string, userId: string, reason?: string) {
+    return this.cancelOrder(orderCode, userId, reason);
+  }
+
+  async cancelForStaff(orderCode: string, staffId: string, reason: string) {
+    return this.cancelOrder(orderCode, undefined, reason, staffId);
+  }
+
+  private async cancelOrder(
+    orderCode: string,
+    userId?: string,
+    reason?: string,
+    staffId?: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id" FROM "Order"
+        WHERE ("id" = ${orderCode} OR "orderCode" = ${orderCode})
+        ${userId !== undefined ? Prisma.sql`AND "userId" = ${userId}` : Prisma.empty}
+        FOR UPDATE
+      `);
+      const order = await tx.order.findFirst({
+        where: {
+          OR: [{ id: orderCode }, { orderCode }],
+          ...(userId !== undefined ? { userId } : {}),
+        },
+        include: { items: true, payments: { include: { refund: true } } },
+      });
+      if (!order) throw new NotFoundException('Không tìm thấy đơn hàng.');
+      if (staffId !== undefined) {
+        const actor = await tx.user.findUnique({
+          where: { id: staffId },
+          select: { role: true },
+        });
+        if (!actor || !['STAFF', 'ADMIN'].includes(actor.role))
+          throw new ForbiddenException('Tài khoản không còn quyền nhân viên.');
+      }
+      if (order.status === 'CANCELLED') {
+        return {
+          orderCode: order.orderCode,
+          status: 'CANCELLED' as const,
+          ...refundSummary(order.payments),
+        };
+      }
+      assertTransition(order.status, 'CANCELLED');
+      if (
+        userId !== undefined &&
+        (order.status === 'PAID' ||
+          order.payments.some((payment) =>
+            SETTLED_PAYMENT_STATUSES.includes(payment.status),
+          ))
+      ) {
+        throw new ForbiddenException(
+          'Đơn đã thanh toán. Vui lòng liên hệ nhân viên để được hỗ trợ hủy trước khi pha chế.',
+        );
+      }
+      if (
+        order.status === 'PAID' &&
+        Number(order.total) > 0 &&
+        !order.payments.some((payment) =>
+          SETTLED_PAYMENT_STATUSES.includes(payment.status),
+        )
+      ) {
+        throw new ConflictException(
+          'Đơn đã thanh toán nhưng thiếu giao dịch để hoàn tiền. Cần đối soát.',
+        );
+      }
+      const changed = await tx.order.updateMany({
+        where: { id: order.id, status: order.status },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancellationReason: reason?.trim() || null,
+          cancelledById: staffId ?? userId ?? null,
+          cancellationActor:
+            staffId !== undefined
+              ? 'STAFF'
+              : userId !== undefined
+                ? 'CUSTOMER'
+                : 'SYSTEM',
+        },
+      });
+      if (changed.count !== 1)
+        throw new ConflictException('Trạng thái đơn hàng đã thay đổi.');
+      const quantities = new Map<string, Prisma.Decimal>();
+      for (const item of order.items) {
+        const snapshot = item.snapshot as {
+          ingredientsUsed?: Array<{ ingredientId: string; quantity: number }>;
+        } | null;
+        // Older orders reserved product stock before ingredient inventory existed.
+        if (snapshot?.ingredientsUsed === undefined) continue;
+        if (!Array.isArray(snapshot.ingredientsUsed))
+          throw new ConflictException('Invalid reserved ingredient snapshot.');
+        for (const ingredient of snapshot.ingredientsUsed) {
+          if (
+            !ingredient ||
+            typeof ingredient.ingredientId !== 'string' ||
+            !ingredient.ingredientId ||
+            typeof ingredient.quantity !== 'number' ||
+            !Number.isFinite(ingredient.quantity) ||
+            ingredient.quantity <= 0
+          )
+            throw new ConflictException(
+              'Invalid reserved ingredient snapshot.',
+            );
+          quantities.set(
+            ingredient.ingredientId,
+            (
+              quantities.get(ingredient.ingredientId) ?? new Prisma.Decimal(0)
+            ).plus(ingredient.quantity),
+          );
+        }
+      }
+      // Restore the quantities recorded at checkout, even if recipes changed.
+      // Same lock order as checkout: ingredients, promotion, then user balance.
+      for (const ingredientId of [...quantities.keys()].sort()) {
+        await tx.ingredient.update({
+          where: { id: ingredientId },
+          data: {
+            stock: { increment: quantities.get(ingredientId)! },
+            stockVersion: { increment: 1 },
+          },
+        });
+      }
+      if (order.promotionCode) {
+        await tx.promotion.updateMany({
+          where: { code: order.promotionCode, usedCount: { gt: 0 } },
+          data: { usedCount: { decrement: 1 } },
+        });
+      }
+      await reverseCancellationPoints(tx, order);
+      for (const payment of order.payments) {
+        if (payment.status === 'SUCCEEDED') await requestRefund(tx, payment);
+      }
+      await tx.payment.updateMany({
+        where: { orderId: order.id, status: { in: ['PENDING', 'FAILED'] } },
+        data: { status: 'CANCELLED' },
+      });
+      const payments = await tx.payment.findMany({
+        where: { orderId: order.id },
+        include: { refund: true },
+      });
+      return {
+        orderCode: order.orderCode,
+        status: 'CANCELLED' as const,
+        ...refundSummary(payments),
+      };
     });
   }
 
@@ -161,7 +312,9 @@ export class OrdersService {
       transaction.topping.findMany({ where: { id: { in: toppingIds } } }),
     ]);
     const sizesById = new Map(sizes.map((size) => [size.id, size]));
-    const toppingsById = new Map(toppings.map((topping) => [topping.id, topping]));
+    const toppingsById = new Map(
+      toppings.map((topping) => [topping.id, topping]),
+    );
     for (const id of sizeIds) {
       if (!sizesById.has(id)) {
         throw new BadRequestException(`Kích cỡ không khả dụng: ${id}.`);
@@ -187,7 +340,12 @@ export class OrdersService {
     }
 
     const ingredientConsumptionByItem: Array<
-      Array<{ ingredientId: string; name: string; unit: string; quantity: number }>
+      Array<{
+        ingredientId: string;
+        name: string;
+        unit: string;
+        quantity: number;
+      }>
     > = [];
     const requiredIngredients = new Map<
       string,
@@ -222,7 +380,9 @@ export class OrdersService {
         itemIngredients.set(ingredient.id, {
           name: ingredient.name,
           unit: ingredient.unit,
-          quantity: (existing?.quantity ?? new Prisma.Decimal(0)).plus(quantity),
+          quantity: (existing?.quantity ?? new Prisma.Decimal(0)).plus(
+            quantity,
+          ),
         });
       };
       for (const recipe of baseRecipe) {
@@ -259,10 +419,18 @@ export class OrdersService {
       }
 
       const selectedSize = sizesById.get(item.sizeId)!;
-      const size = { id: selectedSize.id, name: selectedSize.name, extraPrice: selectedSize.extraPrice };
+      const size = {
+        id: selectedSize.id,
+        name: selectedSize.name,
+        extraPrice: selectedSize.extraPrice,
+      };
       const toppings = item.toppingIds.map((id) => {
         const topping = toppingsById.get(id)!;
-        return { id: topping.id, name: topping.name, extraPrice: topping.extraPrice };
+        return {
+          id: topping.id,
+          name: topping.name,
+          extraPrice: topping.extraPrice,
+        };
       });
       const basePrice = product.price.toNumber();
       const unitPrice =
@@ -296,7 +464,13 @@ export class OrdersService {
     const persist = async (tx: Prisma.TransactionClient): Promise<Order> => {
       const inventory = await tx.ingredient.findMany({
         where: { id: { in: [...requiredIngredients.keys()] } },
-        select: { id: true, name: true, unit: true, stock: true, stockVersion: true },
+        select: {
+          id: true,
+          name: true,
+          unit: true,
+          stock: true,
+          stockVersion: true,
+        },
       });
       const inventoryById = new Map(
         inventory.map((ingredient) => [ingredient.id, ingredient]),
@@ -422,11 +596,15 @@ export class OrdersService {
       orderBy: { createdAt: 'desc' },
       include: {
         items: { include: { product: { select: { name: true } } } },
+        payments: { include: { refund: true } },
       },
     });
 
     return orders.map((order) => ({
       orderCode: order.orderCode,
+      paymentMethod: order.payments.find(
+        (payment) => payment.method === 'SEPAY_API_V2',
+      )?.method,
       status: order.status,
       totalAmount: order.total.toNumber(),
       subtotalAmount: order.subtotal?.toNumber(),
@@ -436,6 +614,10 @@ export class OrdersService {
       pointsDiscount: order.pointsDiscount.toNumber(),
       pointsEarned: order.pointsEarned,
       pointsRefunded: order.pointsRefundedAt !== null,
+      pointsReversed: order.pointsReversedAt !== null,
+      cancelledAt: order.cancelledAt?.toISOString() ?? null,
+      cancellationReason: order.cancellationReason,
+      ...refundSummary(order.payments),
       createdAt: order.createdAt.toISOString(),
       items: order.items.map((item) => {
         const snapshot = item.snapshot as unknown as Partial<OrderItem> | null;

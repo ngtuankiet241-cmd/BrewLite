@@ -1,12 +1,16 @@
+import { API_URL } from "../config/api";
+
 export type Account = {
   id: string;
   email: string;
   phone: string | null;
+  role: "CUSTOMER" | "STAFF" | "ADMIN";
   loyaltyPoints: number;
+  loyaltyDebt: number;
   loyaltyPolicy: { spendPerPoint: number; pointValue: number };
 };
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+export { API_URL };
 
 export async function fetchAccount(signal?: AbortSignal): Promise<Account> {
   const token = localStorage.getItem("brewlite_access_token");

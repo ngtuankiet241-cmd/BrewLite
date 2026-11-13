@@ -10,6 +10,7 @@ type AuthUser = {
   id: string;
   email: string;
   phone: string;
+  role?: "CUSTOMER" | "STAFF" | "ADMIN";
   loyaltyPoints: number;
 };
 

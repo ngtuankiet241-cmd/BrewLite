@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
+  Param,
   Post,
   Req,
   UseGuards,
@@ -12,6 +14,7 @@ import {
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
+import { CancelOrderDto } from './dto/cancel-order.dto.js';
 import type { Order } from './order.types.js';
 import { OrdersService } from './orders.service.js';
 
@@ -24,6 +27,23 @@ export class OrdersController {
   @Get(['history', 'me'])
   getHistory(@Req() request: AuthenticatedRequest) {
     return this.ordersService.getHistory(request.user.sub);
+  }
+
+  @Post(':orderCode/cancel')
+  @HttpCode(200)
+  cancel(
+    @Req() request: AuthenticatedRequest,
+    @Param('orderCode') orderCode: string,
+    @Body(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    dto: CancelOrderDto,
+  ) {
+    return this.ordersService.cancel(orderCode, request.user.sub, dto.reason);
   }
 
   // Tạo đơn hàng mới

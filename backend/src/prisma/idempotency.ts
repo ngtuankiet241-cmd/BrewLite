@@ -6,7 +6,7 @@ import type { PrismaService } from './prisma.service.js';
 export async function withIdempotency<T>(
   prisma: PrismaService,
   userId: string,
-  operation: 'orders.create' | 'payments.create',
+  operation: 'orders.create' | 'payments.create' | 'payments.v2.create',
   key: string | undefined,
   request: unknown,
   run: (tx: Prisma.TransactionClient) => Promise<T>,

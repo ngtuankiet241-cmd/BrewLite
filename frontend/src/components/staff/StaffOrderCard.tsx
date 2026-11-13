@@ -1,5 +1,6 @@
 import type { StaffOrder } from "../../lib/staff-api";
 import { getStaffOrderActions, type StaffActionStatus } from "../../lib/staff-order-status";
+import { refundStatusLabels, type StaffRefund } from "../../lib/staff-orders";
 import OrderStatusBadge from "./OrderStatusBadge";
 
 const money = new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" });
@@ -12,9 +13,10 @@ interface StaffOrderCardProps {
   disabled: boolean;
   processing: boolean;
   onAction: (order: StaffOrder, status: StaffActionStatus) => void;
+  onRetryRefund: (refund: StaffRefund) => void;
 }
 
-export default function StaffOrderCard({ order, disabled, processing, onAction }: StaffOrderCardProps) {
+export default function StaffOrderCard({ order, disabled, processing, onAction, onRetryRefund }: StaffOrderCardProps) {
   const actions = getStaffOrderActions(order.status);
   return (
     <article aria-label={`Đơn ${order.orderCode}`} aria-busy={processing} className="flex h-full flex-col rounded-2xl border border-stone-200 bg-white shadow-sm">
@@ -27,6 +29,7 @@ export default function StaffOrderCard({ order, disabled, processing, onAction }
           <OrderStatusBadge status={order.status} />
         </div>
         <p className="mt-3 text-xs text-stone-500">Đặt lúc <time dateTime={order.createdAt}>{dateTime.format(new Date(order.createdAt))}</time> · Giờ Việt Nam</p>
+        {order.customer && <p className="mt-2 break-words text-xs text-stone-600">{order.customer.email}{order.customer.phone ? ` · ${order.customer.phone}` : ""}</p>}
       </div>
       <ul className="flex-1 divide-y divide-stone-100 px-5" aria-label="Các món trong đơn">
         {order.items.map((item, index) => (
@@ -45,6 +48,20 @@ export default function StaffOrderCard({ order, disabled, processing, onAction }
           <span className="text-sm text-stone-600">Tổng tiền</span>
           <strong className="text-lg text-emerald-950">{money.format(order.total)}</strong>
         </div>
+        {order.cancellationReason && <p className="mt-3 break-words text-sm text-stone-600">Lý do hủy: {order.cancellationReason}</p>}
+        {order.refundStatus !== "NONE" && (
+          <div className="mt-4 space-y-3 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm">
+            <p className="font-semibold text-stone-800">{refundStatusLabels[order.refundStatus]} · {money.format(order.refundAmount)}</p>
+            {order.refunds.map((refund) => (
+              <div key={refund.id} className="space-y-2">
+                {refund.completedAt && <p className="text-xs text-stone-500">Hoàn tất: {dateTime.format(new Date(refund.completedAt))}</p>}
+                {refund.status === "PENDING" && <p className="text-xs leading-5 text-stone-600">Đang chờ xác nhận kết quả hoàn tiền.</p>}
+                {refund.lastError && <p className="break-words text-xs text-rose-700">Mã đối soát: {refund.lastError}</p>}
+                {refund.canRetry && order.status === "CANCELLED" && <button type="button" disabled={disabled} onClick={() => onRetryRefund(refund)} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-50">Gửi lại yêu cầu hoàn tiền</button>}
+              </div>
+            ))}
+          </div>
+        )}
         {actions.length > 0 ? (
           <div className="mt-4 flex flex-wrap gap-2">
             {actions.map((action) => (

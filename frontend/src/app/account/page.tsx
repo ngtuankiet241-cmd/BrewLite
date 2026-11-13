@@ -126,6 +126,7 @@ export default function AccountPage() {
                 {" "}1 điểm đổi {user.loyaltyPolicy.pointValue.toLocaleString("vi-VN")}đ giảm giá cho đơn tiếp theo.
               </p>
               <p className="mt-2 text-sm text-emerald-100">Có thể quy đổi {(user.loyaltyPoints * user.loyaltyPolicy.pointValue).toLocaleString("vi-VN")}đ.</p>
+              {user.loyaltyDebt > 0 && <p className="mt-2 text-sm text-amber-100">Còn {user.loyaltyDebt} điểm cần bù do hủy đơn đã nhận thưởng. Điểm nhận tiếp theo sẽ tự bù khoản này trước khi có thể sử dụng.</p>}
             </div>
 
             <Link

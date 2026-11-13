@@ -20,7 +20,14 @@ export class AuthService {
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, phone: true, loyaltyPoints: true },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        role: true,
+        loyaltyPoints: true,
+        loyaltyDebt: true,
+      },
     });
     if (!user) throw new UnauthorizedException('Tài khoản không còn tồn tại.');
     return { ...user, loyaltyPolicy: LOYALTY_POLICY };
@@ -55,11 +62,13 @@ export class AuthService {
         email,
         phone,
         passwordHash,
+        role: 'CUSTOMER',
       },
       select: {
         id: true,
         email: true,
         phone: true,
+        role: true,
         loyaltyPoints: true,
       },
     });
@@ -102,6 +111,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         phone: user.phone,
+        role: user.role,
         loyaltyPoints: user.loyaltyPoints,
       },
     };

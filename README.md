@@ -151,8 +151,13 @@ Set `DATABASE_URL` in `backend/.env` for PostgreSQL and `JWT_SECRET` for login.
 `.env.example` contains configuration placeholders. Never commit `.env` files,
 passwords, JWT secrets, or payment credentials.
 
-For SePay Sandbox configuration and payment troubleshooting, see
+New payments and refunds use SePay API v2 Sandbox with QR and authenticated bank
+webhooks. For the exact Dashboard setup and payment troubleshooting, see
 [the SePay setup guide](docs/sepay-sandbox.md).
+
+Staff manage orders at `/staff`, including cancellation before preparation
+and refund follow-up. Customers can only cancel unpaid orders. See
+[staff account provisioning and permissions](docs/staff-orders.md).
 
 Customers earn 1 point per 1,000 VND paid and can redeem each point for a 10 VND
 discount in the cart. See [the loyalty rules and API](docs/loyalty-points.md).

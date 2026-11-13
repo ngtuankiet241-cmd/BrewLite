@@ -5,21 +5,27 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SePayPgClient } from 'sepay-pg-node';
+import { BankPaymentsService } from './bank-payments.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { withIdempotency } from '../prisma/idempotency.js';
 import { CreatePaymentDto } from './dto/create-payment.dto.js';
 import { awardPoints } from '../loyalty/loyalty.js';
+import {
+  refundSummary,
+  requestRefund,
+  SETTLED_PAYMENT_STATUSES,
+} from './refunds.js';
 
 type SePayIpn = {
   notification_type?: string;
   order?: {
+    order_id?: string;
     order_status?: string;
     order_currency?: string;
     order_amount?: string | number;
     order_invoice_number?: string;
   };
   transaction?: {
+    payment_method?: string;
     transaction_status?: string;
     transaction_amount?: string | number;
     transaction_currency?: string;
@@ -28,139 +34,35 @@ type SePayIpn = {
 
 @Injectable()
 export class PaymentsService {
-  private readonly sepay: SePayPgClient;
+  private readonly bankPayments: BankPaymentsService;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {
-    const env = this.config.get<string>('SEPAY_ENV');
-    const merchantId = this.config.get<string>('SEPAY_MERCHANT_ID');
-    const secretKey = this.config.get<string>('SEPAY_SECRET_KEY');
-    if (env !== 'sandbox' || !merchantId || !secretKey) {
-      throw new Error('Thiếu cấu hình SePay Sandbox trong backend/.env.');
-    }
-
-    this.sepay = new SePayPgClient({
-      env: 'sandbox',
-      merchant_id: merchantId,
-      secret_key: secretKey,
-    });
+    this.bankPayments = new BankPaymentsService(prisma, config);
   }
 
-  async create(
+  create(
     dto: CreatePaymentDto,
     userId: string,
     idempotencyKey: string | undefined,
   ) {
-    return withIdempotency(
-      this.prisma,
-      userId,
-      'payments.create',
-      idempotencyKey,
-      { orderCode: dto.orderCode },
-      async (tx) => {
-        // Different keys for the same invoice must also share one payment row.
-        // Lock before reading so a concurrent IPN cannot be reset to PENDING.
-        await tx.$queryRaw`
-        SELECT "id" FROM "Order"
-        WHERE "orderCode" = ${dto.orderCode} AND "userId" = ${userId}
-        FOR UPDATE
-      `;
-        const order = await tx.order.findFirst({
-          where: {
-            orderCode: dto.orderCode,
-            userId,
-          },
-        });
-
-        if (!order) {
-          throw new BadRequestException(
-            'Không tìm thấy đơn hàng của tài khoản này.',
-          );
-        }
-
-        if (order.status === 'PAID') {
-          throw new BadRequestException('Đơn hàng đã được thanh toán.');
-        }
-
-        if (order.status !== 'PENDING' && order.status !== 'PAYMENT_FAILED') {
-          throw new BadRequestException(
-            'Trạng thái đơn hàng không cho phép thanh toán.',
-          );
-        }
-
-        const paymentKey = `sepay:${order.id}`;
-
-        const existing = await tx.payment.findUnique({
-          where: { idempotencyKey: paymentKey },
-        });
-
-        if (existing?.status === 'SUCCEEDED') {
-          throw new BadRequestException(
-            'Đơn hàng đã có giao dịch thanh toán thành công.',
-          );
-        }
-
-        const frontendUrl =
-          this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000';
-
-        // The checkout API verifies a fixed field order. Supply merchant explicitly
-        // so SDK v1.0.0 keeps it here instead of appending it after the callback URLs.
-        const fields = this.sepay.checkout.initOneTimePaymentFields({
-          order_amount: Number(order.total),
-          merchant: this.config.getOrThrow<string>('SEPAY_MERCHANT_ID'),
-          currency: 'VND',
-          operation: 'PURCHASE',
-          order_description: `BrewLite ${order.orderCode}`,
-          order_invoice_number: order.orderCode,
-          payment_method: 'BANK_TRANSFER',
-          success_url: `${frontendUrl}/payment/result?orderCode=${encodeURIComponent(order.orderCode)}`,
-          error_url: `${frontendUrl}/payment/result?orderCode=${encodeURIComponent(order.orderCode)}`,
-          cancel_url: `${frontendUrl}/payment/result?orderCode=${encodeURIComponent(order.orderCode)}`,
-        });
-
-        const updated = await tx.order.updateMany({
-          where: { id: order.id, status: order.status },
-          data: { status: 'PENDING' },
-        });
-        if (updated.count !== 1) {
-          throw new ConflictException(
-            'Trạng thái đơn hàng đã thay đổi. Vui lòng kiểm tra lại thanh toán.',
-          );
-        }
-
-        if (existing && existing.status !== 'PENDING') {
-          await tx.payment.update({
-            where: { id: existing.id },
-            data: {
-              amount: order.total,
-              method: 'SEPAY_BANK_TRANSFER',
-              status: 'PENDING',
-            },
-          });
-        } else if (!existing) {
-          await tx.payment.create({
-            data: {
-              orderId: order.id,
-              idempotencyKey: paymentKey,
-              amount: order.total,
-              method: 'SEPAY_BANK_TRANSFER',
-              status: 'PENDING',
-            },
-          });
-        }
-
-        return {
-          orderCode: order.orderCode,
-          checkoutUrl: this.sepay.checkout.initCheckoutUrl(),
-          formFields: fields,
-          paymentStatus: 'PENDING',
-        };
-      },
-    );
+    return this.bankPayments.create(dto.orderCode, userId, idempotencyKey);
   }
 
+  getCheckout(orderCode: string, userId: string) {
+    return this.bankPayments.checkout(orderCode, userId);
+  }
+
+  handleWebhook(
+    authorization: string | undefined,
+    body: Record<string, unknown>,
+  ) {
+    return this.bankPayments.webhook(authorization, body);
+  }
+
+  // Legacy Gateway IPNs only settle payments originally created by Gateway.
   async handleIpn(secretHeader: string | undefined, body: SePayIpn) {
     const expectedSecret = this.config.get<string>('SEPAY_IPN_SECRET_KEY');
 
@@ -186,7 +88,21 @@ export class PaymentsService {
       throw new BadRequestException('Dữ liệu IPN không hợp lệ.');
     }
 
+    if (
+      body.transaction &&
+      (body.transaction.transaction_status !== 'APPROVED' ||
+        body.transaction.transaction_currency !== 'VND' ||
+        Number(body.transaction.transaction_amount) !== amount ||
+        (body.transaction.payment_method !== undefined &&
+          body.transaction.payment_method !== 'BANK_TRANSFER'))
+    ) {
+      throw new BadRequestException(
+        'Giao dịch IPN không khớp khoản thanh toán.',
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "orderCode" = ${invoice} FOR UPDATE`;
       const order = await tx.order.findUnique({
         where: { orderCode: invoice },
         include: { payments: true },
@@ -207,13 +123,13 @@ export class PaymentsService {
         order.payments.some(
           (payment) =>
             payment.method === 'SEPAY_BANK_TRANSFER' &&
-            payment.status === 'SUCCEEDED',
+            SETTLED_PAYMENT_STATUSES.includes(payment.status),
         )
       ) {
         return { received: true, alreadyProcessed: true };
       }
 
-      if (!['PENDING', 'PAYMENT_FAILED'].includes(order.status)) {
+      if (!['PENDING', 'PAYMENT_FAILED', 'CANCELLED'].includes(order.status)) {
         throw new BadRequestException(
           'Trạng thái đơn hàng không cho phép xác nhận thanh toán.',
         );
@@ -230,6 +146,18 @@ export class PaymentsService {
       }
 
       // Claim the transition first, then settle the payment and points together.
+      if (body.order?.order_id) {
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { gatewayOrderCode: body.order.order_id },
+        });
+      }
+      // A late capture must be refunded without reopening a cancelled order.
+      if (order.status === 'CANCELLED') {
+        await requestRefund(tx, payment);
+        return { received: true, refundPending: true };
+      }
+
       // A concurrent callback cannot credit the same order a second time.
       const updated = await tx.order.updateMany({
         where: { id: order.id, status: order.status },
@@ -262,6 +190,7 @@ export class PaymentsService {
         payments: {
           orderBy: { id: 'desc' },
           take: 1,
+          include: { refund: true },
         },
       },
     });
@@ -277,6 +206,9 @@ export class PaymentsService {
       pointsEarned: order.pointsEarned,
       pointsRedeemed: order.pointsRedeemed,
       pointsDiscount: Number(order.pointsDiscount),
+      pointsRefunded: order.pointsRefundedAt !== null,
+      pointsReversed: order.pointsReversedAt !== null,
+      ...refundSummary(order.payments),
     };
   }
 }
