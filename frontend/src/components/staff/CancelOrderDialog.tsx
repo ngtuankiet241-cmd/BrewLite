@@ -30,7 +30,7 @@ export default function CancelOrderDialog({ orderCode, onClose, onConfirm }: Can
       <h2 id="cancel-order-title" className="mt-3 text-xl font-bold">Hủy đơn hàng?</h2>
       <div id="cancel-order-description" className="mt-3 space-y-3 text-sm leading-6 text-stone-600">
         <p>Mã đơn: <strong className="break-all text-stone-900">{orderCode}</strong></p>
-        <p>Đơn sẽ bị hủy. Kho nguyên liệu, lượt mã giảm giá và điểm đã dùng sẽ được hoàn lại; điểm tích lũy từ đơn này sẽ được thu hồi.</p>
+        <p>Đơn sẽ bị hủy. Nguyên liệu có thể được hoàn về kho hoặc cần kiểm tra thủ công. Lượt mã giảm giá và điểm đã dùng sẽ được hoàn lại; điểm tích lũy từ đơn này sẽ được thu hồi.</p>
         <p>Nếu đã thanh toán qua SePay Sandbox, hệ thống sẽ giả lập hoàn đúng số tiền đã trả. Không chuyển tiền thật.</p>
       </div>
       <label htmlFor="cancel-order-reason" className="mt-4 block text-sm font-semibold">Lý do hủy</label>
