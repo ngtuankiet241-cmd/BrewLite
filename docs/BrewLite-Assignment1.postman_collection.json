@@ -1,0 +1,1009 @@
+{
+  "info": {
+    "name": "BrewLite – Assignment 1",
+    "description": "Collection test đầy đủ các luồng nghiệp vụ Assignment 1 BrewLite:\n1. Xem thực đơn & tùy chọn\n2. Đăng ký / Đăng nhập\n3. Xem thông tin tài khoản\n4. Đặt đơn hàng (hợp lệ, có topping, có promotion)\n5. Validation – Từ chối đơn không hợp lệ\n6. Idempotency – Retry an toàn\n7. Lịch sử đơn hàng\n8. Staff – Quản lý đơn & hủy đơn\n9. Loyalty Points – Điểm thưởng\n\nBase URL: http://localhost:3001\nToken được tự động lưu sau khi đăng nhập.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",         "value": "http://localhost:3001", "type": "string" },
+    { "key": "customerToken",   "value": "", "type": "string" },
+    { "key": "staffToken",      "value": "", "type": "string" },
+    { "key": "orderCode",       "value": "", "type": "string" },
+    { "key": "idempotencyKey",  "value": "", "type": "string" },
+    { "key": "testPhone",       "value": "0912345678", "type": "string" },
+    { "key": "testPassword",    "value": "Test@1234", "type": "string" }
+  ],
+  "item": [
+
+    {
+      "name": "1 – Thực đơn & Tùy chọn",
+      "item": [
+        {
+          "name": "1.1 GET Danh sách sản phẩm",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Trả về mảng sản phẩm', () => pm.expect(json).to.be.an('array'));",
+                  "pm.test('Mỗi sản phẩm có đủ trường bắt buộc', () => {",
+                  "  json.forEach(p => {",
+                  "    pm.expect(p).to.have.all.keys(['id','name','price','imageUrl','category','stock','stockBySize']);",
+                  "    pm.expect(p.price).to.be.a('number').and.above(0);",
+                  "    pm.expect(p.stockBySize).to.include.all.keys(['S','M','L']);",
+                  "  });",
+                  "});",
+                  "pm.test('Có đúng 10 sản phẩm (seed mặc định)', () => pm.expect(json.length).to.equal(10));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/products",
+            "description": "Trả về danh sách 10 sản phẩm. Mỗi sản phẩm có id, name, price (VND), imageUrl, category, stock và stockBySize (S/M/L)."
+          }
+        },
+        {
+          "name": "1.2 GET Tùy chọn thực đơn (sizes, toppings, categories)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Có trường categories, sizes, toppings', () => {",
+                  "  pm.expect(json).to.have.all.keys(['categories','sizes','toppings']);",
+                  "});",
+                  "pm.test('Có 3 kích cỡ S/M/L', () => {",
+                  "  const sizeIds = json.sizes.map(s => s.id);",
+                  "  pm.expect(sizeIds).to.include.members(['S','M','L']);",
+                  "});",
+                  "pm.test('Topping có extraPrice là số', () => {",
+                  "  json.toppings.forEach(t => pm.expect(t.extraPrice).to.be.a('number'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/products/options",
+            "description": "Trả về danh sách kích cỡ, topping và danh mục. Dùng để render dropdown khi chọn sản phẩm."
+          }
+        },
+        {
+          "name": "1.3 GET Chi tiết sản phẩm (coffee-milk)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('id đúng', () => pm.expect(json.id).to.equal('coffee-milk'));",
+                  "pm.test('price là số nguyên dương', () => pm.expect(json.price).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/products/coffee-milk",
+            "description": "Trả về chi tiết một sản phẩm theo id."
+          }
+        },
+        {
+          "name": "1.4 GET Sản phẩm không tồn tại → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/products/san-pham-khong-ton-tai",
+            "description": "Sản phẩm không có trong database phải trả 404."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "2 – Xác thực (Auth)",
+      "item": [
+        {
+          "name": "2.1 POST Đăng ký tài khoản mới",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Sinh số điện thoại test ngẫu nhiên dạng 09xxxxxxxx",
+                  "const rand = Math.floor(10000000 + Math.random() * 89999999);",
+                  "pm.collectionVariables.set('testPhone', '09' + rand);",
+                  "pm.collectionVariables.set('testPassword', 'Test@1234');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Đăng ký thành công, có user.id', () => pm.expect(json.user).to.have.property('id'));",
+                  "pm.test('Có message', () => pm.expect(json.message).to.be.a('string'));",
+                  "// Register KHÔNG trả về token – phải chạy 2.2 (Login) để lấy token",
+                  "console.log('Đăng ký thành công! Phone:', pm.collectionVariables.get('testPhone'), '→ Chạy tiếp request 2.2 để lấy token.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/register",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test-{{testPhone}}@brewlite.dev\",\n  \"phone\": \"{{testPhone}}\",\n  \"password\": \"{{testPassword}}\"\n}"
+            },
+            "description": "Tạo tài khoản CUSTOMER mới.\nRegisterDto yêu cầu ĐỦ 3 field:\n- email: định dạng email hợp lệ\n- phone: 10 chữ số, bắt đầu bằng 0 (vd: 0912345678)\n- password: 8–72 ký tự\n\nSố điện thoại ngẫu nhiên được sinh trong Pre-request script. Email được tự ghép từ phone. Token trả về lưu vào customerToken."
+          }
+        },
+        {
+          "name": "2.2 POST Đăng nhập (Customer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 hoặc 201', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "// Backend trả về 'accessToken' (camelCase), không phải 'access_token'",
+                  "pm.test('Có accessToken', () => pm.expect(json.accessToken).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('customerToken', json.accessToken);",
+                  "console.log('✅ customerToken đã lưu:', json.accessToken ? json.accessToken.substring(0,30) + '...' : 'KHÔNG CÓ TOKEN');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{testPhone}}\",\n  \"password\": \"{{testPassword}}\"\n}"
+            },
+            "description": "Đăng nhập = lấy token.\nBackend trả về: { message, accessToken, user }\n⚠️ Phải chạy 2.1 trước để testPhone & testPassword có giá trị.\nToken (accessToken) sẽ được tự động lưu vào biến customerToken."
+          }
+        },
+        {
+          "name": "2.3 GET Thông tin tài khoản (GET /auth/me)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Có loyaltyPoints và loyaltyPolicy', () => {",
+                  "  pm.expect(json).to.have.property('loyaltyPoints');",
+                  "  pm.expect(json).to.have.property('loyaltyPolicy');",
+                  "  pm.expect(json.loyaltyPolicy.spendPerPoint).to.equal(1000);",
+                  "  pm.expect(json.loyaltyPolicy.pointValue).to.equal(10);",
+                  "});",
+                  "pm.test('Role là CUSTOMER', () => pm.expect(json.role).to.equal('CUSTOMER'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/auth/me",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "description": "Lấy profile đầy đủ: email, name, role, loyaltyPoints, loyaltyDebt, loyaltyPolicy."
+          }
+        },
+        {
+          "name": "2.4 GET /auth/me không có token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/auth/me",
+            "description": "Không gửi Authorization header → phải trả 401."
+          }
+        },
+        {
+          "name": "2.5 POST Đăng nhập Staff",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.accessToken) {",
+                  "  pm.collectionVariables.set('staffToken', json.accessToken);",
+                  "  console.log('✅ Staff token đã lưu.');",
+                  "} else {",
+                  "  console.warn('Không lấy được staffToken. Hãy đăng ký và cấp quyền STAFF trước.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{testPhone}}\",\n  \"password\": \"{{testPassword}}\"\n}"
+            },
+            "description": "⚠️ Tài khoản này cần được tạo và cấp quyền STAFF trước:\n  1. Đăng ký tài khoản với phone: 0900000001\n  2. cd backend\n  3. npm run staff:grant -- 0900000001"
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "3 – Đặt đơn hàng",
+      "item": [
+        {
+          "name": "3.1 POST Đặt đơn hợp lệ (1 món, size M)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Có orderCode', () => pm.expect(json.orderCode).to.be.a('string').and.not.empty);",
+                  "pm.test('Status là PENDING hoặc PAID', () => pm.expect(json.status).to.be.oneOf(['PENDING','PAID']));",
+                  "pm.test('totalAmount là số dương', () => pm.expect(json.totalAmount).to.be.above(0));",
+                  "pm.test('Có items', () => pm.expect(json.items).to.be.an('array').and.have.length.above(0));",
+                  "pm.collectionVariables.set('orderCode', json.orderCode);",
+                  "console.log('orderCode đã lưu:', json.orderCode);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization",   "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",    "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"coffee-milk\",\n      \"quantity\": 1,\n      \"sizeId\": \"M\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "Đặt 1 ly Cà phê sữa size M. Giá do backend tính (35.000 VND + phụ phí size M). orderCode được lưu để dùng ở các request sau."
+          }
+        },
+        {
+          "name": "3.2 POST Đặt đơn nhiều món + topping",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Có 2 item trong đơn', () => pm.expect(json.items.length).to.equal(2));",
+                  "pm.test('totalAmount bao gồm phụ phí topping', () => pm.expect(json.totalAmount).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization",   "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",    "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"coffee-milk\",\n      \"quantity\": 2,\n      \"sizeId\": \"M\",\n      \"toppingIds\": [\"cheese\"]\n    },\n    {\n      \"productId\": \"americano\",\n      \"quantity\": 1,\n      \"sizeId\": \"L\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "Đặt 2 Cà phê sữa M + topping cheese, và 1 Americano L. Backend tính topping và phụ phí size."
+          }
+        },
+        {
+          "name": "3.3 POST Đặt đơn với mã khuyến mãi",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('Status 201 hoặc 400 (hết lượt mã)', () => pm.expect(pm.response.code).to.be.oneOf([201,400]));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.test('Có discountAmount', () => pm.expect(json.discountAmount).to.be.a('number').and.at.least(0));",
+                  "  pm.test('Có subtotalAmount', () => pm.expect(json).to.have.property('subtotalAmount'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization",   "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",    "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"Matcha-latte\",\n      \"quantity\": 1,\n      \"sizeId\": \"M\",\n      \"toppingIds\": []\n    }\n  ],\n  \"promotionCode\": \"WELCOME10\"\n}"
+            },
+            "description": "⚠️ Thay WELCOME10 bằng mã khuyến mãi thực tế trong database. Response có subtotalAmount, discountAmount."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "4 – Validation (Từ chối đầu vào không hợp lệ)",
+      "item": [
+        {
+          "name": "4.1 POST Giỏ hàng rỗng → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": []\n}"
+            },
+            "description": "items phải có ít nhất 1 phần tử. Giỏ rỗng → 400."
+          }
+        },
+        {
+          "name": "4.2 POST productId không tồn tại → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400 hoặc 404', () => pm.expect(pm.response.code).to.be.oneOf([400,404]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"san-pham-ao\",\n      \"quantity\": 1,\n      \"sizeId\": \"M\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "productId không có trong database → bị từ chối."
+          }
+        },
+        {
+          "name": "4.3 POST sizeId không hợp lệ → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"coffee-milk\",\n      \"quantity\": 1,\n      \"sizeId\": \"XL\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "sizeId XL không tồn tại trong catalog → 400."
+          }
+        },
+        {
+          "name": "4.4 POST số lượng âm → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"coffee-milk\",\n      \"quantity\": -1,\n      \"sizeId\": \"M\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "quantity phải là số nguyên dương. quantity = -1 → 400."
+          }
+        },
+        {
+          "name": "4.5 POST đặt đơn không có JWT → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"coffee-milk\",\n      \"quantity\": 1,\n      \"sizeId\": \"M\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "POST /orders yêu cầu xác thực. Không có Bearer token → 401."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "5 – Idempotency (Retry an toàn)",
+      "item": [
+        {
+          "name": "5.1 POST Lần 1 – Tạo đơn với Idempotency-Key",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Tạo key CỐ ĐỊNH dùng cho cả 2 request 5.1 và 5.2",
+                  "if (!pm.collectionVariables.get('idempotencyKey') || pm.collectionVariables.get('idempotencyKey') === '') {",
+                  "  pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "}",
+                  "console.log('Idempotency-Key hiện tại:', pm.collectionVariables.get('idempotencyKey'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('orderCode', json.orderCode);",
+                  "console.log('Lần 1 – orderCode:', json.orderCode);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization",   "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",    "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"peach-tea\",\n      \"quantity\": 1,\n      \"sizeId\": \"S\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "Chạy request này TRƯỚC. Idempotency-Key được sinh tự động và lưu vào biến."
+          }
+        },
+        {
+          "name": "5.2 POST Lần 2 – Cùng Key & Body → trả lại kết quả cũ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201 (replay)', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "const firstOrderCode = pm.collectionVariables.get('orderCode');",
+                  "pm.test('orderCode giống lần đầu (không tạo đơn mới)', () => {",
+                  "  pm.expect(json.orderCode).to.equal(firstOrderCode);",
+                  "});",
+                  "console.log('Lần 2 – orderCode:', json.orderCode, '| Kỳ vọng:', firstOrderCode);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization",   "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",    "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"peach-tea\",\n      \"quantity\": 1,\n      \"sizeId\": \"S\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "Chạy NGAY SAU 5.1 với CÙNG Idempotency-Key và body. Phải trả lại cùng orderCode và không tạo đơn mới."
+          }
+        },
+        {
+          "name": "5.3 POST Cùng Key, đổi body → 409 Conflict",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 409 (payload conflict)', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization",   "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",    "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"peach-tea\",\n      \"quantity\": 2,\n      \"sizeId\": \"L\",\n      \"toppingIds\": []\n    }\n  ]\n}"
+            },
+            "description": "Cùng Idempotency-Key nhưng đổi body (quantity 2, size L) → phải trả 409 Conflict."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "6 – Lịch sử đơn hàng",
+      "item": [
+        {
+          "name": "6.1 GET Lịch sử đơn của tôi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Trả về mảng đơn hàng', () => pm.expect(json).to.be.an('array'));",
+                  "if (json.length > 0) {",
+                  "  pm.test('Mỗi đơn có orderCode và status', () => {",
+                  "    json.forEach(o => {",
+                  "      pm.expect(o).to.have.property('orderCode');",
+                  "      pm.expect(o).to.have.property('status');",
+                  "    });",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/orders/history",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "description": "Trả về lịch sử đơn hàng của người dùng hiện tại. Yêu cầu Bearer JWT."
+          }
+        },
+        {
+          "name": "6.2 GET Lịch sử không có JWT → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/orders/history",
+            "description": "Không có token → 401."
+          }
+        },
+        {
+          "name": "6.3 GET Trạng thái đơn cụ thể",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 hoặc 404', () => pm.expect(pm.response.code).to.be.oneOf([200,404]));",
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.test('Có status', () => pm.expect(json).to.have.property('status'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/orders/{{orderCode}}/status",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "description": "Trả về trạng thái đơn hàng. Dùng orderCode đã lưu từ bước 3.1."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "7 – Staff: Quản lý đơn & Hủy đơn",
+      "item": [
+        {
+          "name": "7.1 GET Danh sách đơn hàng (Staff)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Có trường orders', () => pm.expect(json).to.have.property('orders'));",
+                  "pm.test('orders là mảng', () => pm.expect(json.orders).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/staff/orders",
+            "header": [{ "key": "Authorization", "value": "Bearer {{staffToken}}" }],
+            "description": "Lấy toàn bộ danh sách đơn hàng. Yêu cầu tài khoản có role STAFF hoặc ADMIN."
+          }
+        },
+        {
+          "name": "7.2 GET Danh sách đơn theo status=PENDING",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "if (json.orders.length > 0) {",
+                  "  pm.test('Tất cả đơn đều PENDING', () => {",
+                  "    json.orders.forEach(o => pm.expect(o.status).to.equal('PENDING'));",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/staff/orders?status=PENDING",
+              "query": [{ "key": "status", "value": "PENDING" }]
+            },
+            "header": [{ "key": "Authorization", "value": "Bearer {{staffToken}}" }],
+            "description": "Lọc đơn theo trạng thái PENDING."
+          }
+        },
+        {
+          "name": "7.3 GET Danh sách đơn không có JWT → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/staff/orders",
+            "description": "Không có JWT → 401."
+          }
+        },
+        {
+          "name": "7.4 GET Danh sách đơn bằng Customer token → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 403 (không đủ quyền)', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/staff/orders",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "description": "CUSTOMER không có quyền truy cập staff API → 403."
+          }
+        },
+        {
+          "name": "7.5 PATCH Cập nhật trạng thái đơn (PENDING → PREPARING)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 hoặc 400 hoặc 404', () => pm.expect(pm.response.code).to.be.oneOf([200,400,404]));",
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.test('Có status mới', () => pm.expect(json).to.have.property('status'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/staff/orders/{{orderCode}}/status",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{staffToken}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PREPARING\",\n  \"expectedStatus\": \"PAID\"\n}"
+            },
+            "description": "⚠️ Chỉ hoạt động khi đơn đã PAID. Chuyển trạng thái PAID → PREPARING. Dùng orderCode đã lưu."
+          }
+        },
+        {
+          "name": "7.6 PATCH Hủy đơn hàng (CANCEL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 hoặc 400 hoặc 404 hoặc 409', () => pm.expect(pm.response.code).to.be.oneOf([200,400,404,409]));",
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.test('Status là CANCELLED', () => pm.expect(json.status).to.equal('CANCELLED'));",
+                  "  console.log('Đơn đã được hủy thành công:', json.orderCode);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/staff/orders/{{orderCode}}/status",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{staffToken}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CANCELLED\",\n  \"expectedStatus\": \"PENDING\",\n  \"reason\": \"Khách yêu cầu hủy trước khi pha chế - test từ Postman\"\n}"
+            },
+            "description": "Hủy đơn PENDING. Hệ thống sẽ hoàn kho nguyên liệu, hoàn điểm thưởng, trả lượt mã khuyến mãi và tạo hoàn tiền giả lập nếu đã thanh toán.\n\nlý do phải có 3–500 ký tự."
+          }
+        },
+        {
+          "name": "7.7 PATCH Hủy đơn đã hủy → 200 không hủy lại",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 hoặc 409', () => pm.expect(pm.response.code).to.be.oneOf([200,409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/staff/orders/{{orderCode}}/status",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{staffToken}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CANCELLED\",\n  \"expectedStatus\": \"PENDING\",\n  \"reason\": \"Thử hủy lần 2\"\n}"
+            },
+            "description": "Hủy lại đơn đã CANCELLED. Phải trả thành công nhưng không hoàn kho/điểm/mã lần nữa."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "8 – Loyalty Points (Điểm thưởng)",
+      "item": [
+        {
+          "name": "8.1 GET Số dư điểm thưởng hiện tại",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Có loyaltyPoints >= 0', () => pm.expect(json.loyaltyPoints).to.be.a('number').and.at.least(0));",
+                  "pm.test('Có loyaltyDebt >= 0', () => pm.expect(json.loyaltyDebt).to.be.a('number').and.at.least(0));",
+                  "console.log(`Điểm hiện có: ${json.loyaltyPoints} | Nợ điểm: ${json.loyaltyDebt}`);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/auth/me",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "description": "Xem số điểm tích lũy, nợ điểm, và chính sách tích điểm (1000 VND = 1 điểm, 1 điểm = 10 VND giảm giá)."
+          }
+        },
+        {
+          "name": "8.2 POST Đặt đơn dùng điểm thưởng",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('Status 201 hoặc 400 (không đủ điểm)', () => pm.expect(pm.response.code).to.be.oneOf([201,400]));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.test('Có pointsRedeemed', () => pm.expect(json.pointsRedeemed).to.be.a('number').and.at.least(0));",
+                  "  pm.test('Có pointsDiscount', () => pm.expect(json.pointsDiscount).to.be.a('number').and.at.least(0));",
+                  "  pm.test('Có pointsEarned', () => pm.expect(json).to.have.property('pointsEarned'));",
+                  "  console.log(`Dùng: ${json.pointsRedeemed} điểm | Giảm: ${json.pointsDiscount} VND | Tích: ${json.pointsEarned} điểm`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/orders",
+            "header": [
+              { "key": "Authorization",   "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type",    "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"Milk-tea\",\n      \"quantity\": 1,\n      \"sizeId\": \"M\",\n      \"toppingIds\": []\n    }\n  ],\n  \"pointsToRedeem\": 10\n}"
+            },
+            "description": "Dùng 10 điểm để giảm 100 VND. Backend kiểm tra số dư điểm; nếu không đủ sẽ trả 400.\n\nThay pointsToRedeem = 0 nếu bạn chưa có điểm."
+          }
+        },
+        {
+          "name": "8.3 GET Loyalty điểm thưởng riêng",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/loyalty/me",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+            "description": "Endpoint loyalty riêng (nếu backend có /loyalty/me). Xem số dư điểm theo tài khoản."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "9 – Health Check",
+      "item": [
+        {
+          "name": "9.1 GET Health check backend",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health",
+            "description": "Kiểm tra backend có đang chạy không. Trả 200 khi tất cả dịch vụ hoạt động bình thường."
+          }
+        }
+      ]
+    }
+
+  ]
+}
